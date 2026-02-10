@@ -6,12 +6,17 @@ export function InputModal({ isOpen, title, initialValue = '', placeholder = '',
     const inputRef = useRef(null);
 
     useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') onClose();
+        };
         if (isOpen) {
+            window.addEventListener('keydown', handleKeyDown);
             setValue(initialValue);
             // Focus input after a short delay to allow render
             setTimeout(() => inputRef.current?.focus(), 50);
         }
-    }, [isOpen, initialValue]);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, initialValue, onClose]);
 
     if (!isOpen) return null;
 
@@ -22,8 +27,14 @@ export function InputModal({ isOpen, title, initialValue = '', placeholder = '',
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in duration-200">
+        <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 transition-opacity"
+            onClick={onClose}
+        >
+            <div
+                className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md animate-in fade-in zoom-in duration-200"
+                onClick={(e) => e.stopPropagation()}
+            >
                 <div className="flex items-center justify-between p-4 border-b border-slate-800">
                     <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
                     <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">

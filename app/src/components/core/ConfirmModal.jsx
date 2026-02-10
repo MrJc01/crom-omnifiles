@@ -1,11 +1,26 @@
+import { useEffect } from 'react';
 import { X, AlertTriangle } from 'lucide-react';
 
 export function ConfirmModal({ isOpen, title, message, onClose, onConfirm, confirmText = 'Confirmar', isDanger = false }) {
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') onClose();
+        };
+        if (isOpen) window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, onClose]);
+
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in duration-200">
+        <div
+            className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 transition-opacity"
+            onClick={onClose}
+        >
+            <div
+                className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-sm animate-in fade-in zoom-in duration-200"
+                onClick={(e) => e.stopPropagation()}
+            >
                 <div className="p-6 text-center">
                     <div className={`mx-auto mb-4 w-12 h-12 rounded-full flex items-center justify-center ${isDanger ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'}`}>
                         <AlertTriangle size={24} />

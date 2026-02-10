@@ -41,6 +41,9 @@ export const ContextMenu = ({ x, y, target, onClose, onAction }) => {
             <button onClick={() => onAction('open', target)} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white flex items-center gap-2 font-medium">
                 <ExternalLink size={14} /> Abrir
             </button>
+            <button onClick={() => onAction('download', target)} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white flex items-center gap-2">
+                <Upload size={14} className="rotate-180" /> Baixar
+            </button>
             <div className="h-px bg-slate-700 my-1"></div>
             <button onClick={() => onAction('rename', target)} className="w-full text-left px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white flex items-center gap-2">
                 <Edit2 size={14} /> Renomear (F2)

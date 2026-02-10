@@ -13,8 +13,9 @@ import { ContextMenu } from './components/core/ContextMenu';
 import { WorkspaceSetup } from './components/settings/WorkspaceSetup';
 import { ProviderSetup } from './components/settings/ProviderSetup';
 import { SettingsScreen } from './components/settings/SettingsScreen';
-import { InputModal } from './components/core/InputModal';
-import { ConfirmModal } from './components/core/ConfirmModal';
+
+import { useModal } from './context/ModalContext';
+import toast from 'react-hot-toast';
 
 function App() {
     const {
@@ -25,24 +26,19 @@ function App() {
         currentFolderId,
         navigate, navigateBreadcrumb, navigateBack, navigateForward, navigateToPath,
         switchWorkspace, createWorkspace, updateWorkspaceData, resetSystem,
-        createFolder, deleteFiles, renameFile, addFiles, importDroppedFiles
+        createFolder, deleteFiles, renameFile, addFiles, importDroppedFiles, downloadFile
     } = useFileSystem();
 
     const { selectedFileIds, setSelectedFileIds, toggleSelection, clearSelection } = useSelection();
     const { isDragging, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(importDroppedFiles);
 
+    const { openInput, openConfirm } = useModal();
     const [viewMode, setViewMode] = useState('grid');
     const [searchQuery, setSearchQuery] = useState('');
     const [showSettings, setShowSettings] = useState(false);
     const [contextMenu, setContextMenu] = useState(null);
-    const [renamingId, setRenamingId] = useState(null);
-    const [renameName, setRenameName] = useState('');
     const [setupWorkspaceName, setSetupWorkspaceName] = useState('');
     const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
-
-    // Modal State
-    const [inputModal, setInputModal] = useState({ isOpen: false, title: '', initialValue: '', onConfirm: () => { } });
-    const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, isDanger: false });
 
     // UI State (Persisted)
     const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
@@ -131,8 +127,7 @@ function App() {
             // Selection Shortcuts
             if (selectedFileIds.length > 0) {
                 if (e.key === 'Delete') {
-                    setConfirmModal({
-                        isOpen: true,
+                    openConfirm({
                         title: 'Eliminar Itens',
                         message: `Tem a certeza que deseja eliminar ${selectedFileIds.length} itens?`,
                         confirmText: 'Eliminar',
@@ -146,15 +141,18 @@ function App() {
                 if (e.key === 'F2') {
                     const fileToRename = files.find(f => f.id === selectedFileIds[0]);
                     if (fileToRename) {
-                        setRenamingId(fileToRename.id);
-                        setRenameName(fileToRename.name);
+                        openInput({
+                            title: 'Renomear',
+                            initialValue: fileToRename.name,
+                            onConfirm: (newName) => renameFile(fileToRename.id, newName)
+                        });
                     }
                 }
             }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [selectedFileIds, files, deleteFiles, clearSelection]);
+    }, [selectedFileIds, files, deleteFiles, clearSelection, openConfirm, openInput, renameFile]);
 
     // Auto-close sidebar on mobile navigation
     useEffect(() => {
@@ -174,13 +172,16 @@ function App() {
         setContextMenu(null);
         switch (action) {
             case 'open': navigate(target); break;
+            case 'download': downloadFile(target); break;
             case 'rename':
-                setRenamingId(target.id);
-                setRenameName(target.name);
+                openInput({
+                    title: 'Renomear',
+                    initialValue: target.name,
+                    onConfirm: (newName) => renameFile(target.id, newName)
+                });
                 break;
             case 'delete':
-                setConfirmModal({
-                    isOpen: true,
+                openConfirm({
                     title: 'Eliminar Ficheiro',
                     message: `Tem a certeza que deseja eliminar "${target.name}"?`,
                     confirmText: 'Eliminar',
@@ -189,29 +190,24 @@ function App() {
                 });
                 break;
             case 'new-folder':
-                setInputModal({
-                    isOpen: true,
+                openInput({
                     title: 'Nova Pasta',
                     initialValue: 'Nova Pasta',
                     onConfirm: (name) => createFolder(name)
                 });
                 break;
             case 'upload': document.getElementById('file-upload-input').click(); break;
-            case 'refresh': alert("Atualizado!"); break;
-            case 'properties': alert(`Nome: ${target.name}\nTipo: ${target.type}\nTamanho: ${target.size}\nModificado: ${target.date}`); break;
+            case 'refresh': toast.success("Atualizado!"); break;
+            case 'properties':
+                openConfirm({
+                    title: 'Propriedades',
+                    message: `Nome: ${target.name}\nTipo: ${target.type}\nTamanho: ${target.size}\nModificado: ${target.date}`,
+                    confirmText: 'Fechar',
+                    isDanger: false,
+                    onConfirm: () => { } // No action needed
+                });
+                break;
         }
-    };
-
-    const handleRenameSave = () => {
-        if (!renameName.trim()) { setRenamingId(null); return; }
-        renameFile(renamingId, renameName);
-        setRenamingId(null);
-        setRenameName('');
-    };
-
-    const handleRenameCancel = () => {
-        setRenamingId(null);
-        setRenameName('');
     };
 
     const handleFileInputChange = async (e) => {
@@ -283,8 +279,7 @@ function App() {
     };
 
     const handleCreateFolderClick = () => {
-        setInputModal({
-            isOpen: true,
+        openInput({
             title: 'Nova Pasta',
             initialValue: 'Nova Pasta',
             onConfirm: (name) => createFolder(name)
@@ -292,8 +287,7 @@ function App() {
     };
 
     const handleCreateWorkspace = () => {
-        setInputModal({
-            isOpen: true,
+        openInput({
             title: 'Novo Workspace',
             initialValue: '',
             placeholder: 'Nome do Workspace',
@@ -322,24 +316,7 @@ function App() {
             {showSettings && <SettingsScreen onClose={() => setShowSettings(false)} data={{ workspaces, files }} onUpdateData={updateWorkspaceData} onResetSystem={resetSystem} activeWorkspaceId={activeWorkspace} />}
             {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} target={contextMenu.target} onClose={() => setContextMenu(null)} onAction={handleContextAction} />}
 
-            <InputModal
-                isOpen={inputModal.isOpen}
-                title={inputModal.title}
-                initialValue={inputModal.initialValue}
-                placeholder={inputModal.placeholder}
-                onClose={() => setInputModal({ ...inputModal, isOpen: false })}
-                onConfirm={inputModal.onConfirm}
-            />
 
-            <ConfirmModal
-                isOpen={confirmModal.isOpen}
-                title={confirmModal.title}
-                message={confirmModal.message}
-                confirmText={confirmModal.confirmText}
-                isDanger={confirmModal.isDanger}
-                onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
-                onConfirm={confirmModal.onConfirm}
-            />
 
             <input type="file" id="file-upload-input" className="hidden" multiple onChange={handleFileInputChange} />
 
@@ -410,11 +387,6 @@ function App() {
                         onContextMenu={handleContextMenu}
                         selectedFileIds={selectedFileIds}
                         onSelect={toggleSelection}
-                        renamingId={renamingId}
-                        renameName={renameName}
-                        setRenameName={setRenameName}
-                        handleRenameSave={handleRenameSave}
-                        handleRenameCancel={handleRenameCancel}
                         sortConfig={sortConfig}
                         requestSort={requestSort}
                     />
