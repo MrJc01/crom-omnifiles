@@ -72,15 +72,36 @@ const OmniDebug = {
 
     init() {
         // Intercept Clicks
+        // Intercept Clicks
         document.addEventListener('click', (e) => {
             const target = e.target;
-            const info = {
-                tagName: target.tagName,
-                id: target.id || null,
-                className: typeof target.className === 'string' ? target.className : null,
-                text: target.innerText?.substring(0, 50) || null,
+
+            // Find closest interactive element or meaningful container
+            const interactive = target.closest('button, a, input, [role="button"], .interactive') || target;
+
+            const getSafeClassName = (el) => {
+                if (!el || !el.className) return '';
+                if (typeof el.className === 'string') return el.className;
+                if (el.className.baseVal) return el.className.baseVal; // SVG
+                return '';
             };
-            this.log('click', `Click on <${target.tagName}>${target.id ? '#' + target.id : ''}`, info);
+
+            const info = {
+                tagName: interactive.tagName,
+                id: interactive.id || null,
+                className: getSafeClassName(interactive),
+                text: interactive.innerText?.substring(0, 50).replace(/\n/g, ' ') || target.innerText?.substring(0, 20).replace(/\n/g, ' ') || null,
+                title: interactive.title || interactive.getAttribute('aria-label') || null,
+                x: e.clientX,
+                y: e.clientY
+            };
+
+            const idStr = info.id ? `#${info.id}` : '';
+            const classStr = info.className ? `.${info.className.split(' ').slice(0, 2).join('.')}` : ''; // First 2 classes
+            const textStr = info.text ? ` "${info.text}"` : '';
+            const titleStr = info.title ? ` [${info.title}]` : '';
+
+            this.log('click', `Click on <${interactive.tagName}${idStr}${classStr}>${textStr}${titleStr}`, info);
         }, true);
 
         // Monitor Functions if exposed

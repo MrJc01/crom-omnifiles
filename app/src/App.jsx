@@ -13,6 +13,8 @@ import { ContextMenu } from './components/core/ContextMenu';
 import { WorkspaceSetup } from './components/settings/WorkspaceSetup';
 import { ProviderSetup } from './components/settings/ProviderSetup';
 import { SettingsScreen } from './components/settings/SettingsScreen';
+import { InputModal } from './components/core/InputModal';
+import { ConfirmModal } from './components/core/ConfirmModal';
 
 function App() {
     const {
@@ -37,6 +39,10 @@ function App() {
     const [renameName, setRenameName] = useState('');
     const [setupWorkspaceName, setSetupWorkspaceName] = useState('');
     const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
+
+    // Modal State
+    const [inputModal, setInputModal] = useState({ isOpen: false, title: '', initialValue: '', onConfirm: () => { } });
+    const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, isDanger: false });
 
     // UI State (Persisted)
     const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
@@ -122,10 +128,17 @@ function App() {
             // Selection Shortcuts
             if (selectedFileIds.length > 0) {
                 if (e.key === 'Delete') {
-                    if (confirm(`Eliminar ${selectedFileIds.length} itens?`)) {
-                        deleteFiles(selectedFileIds);
-                        clearSelection();
-                    }
+                    setConfirmModal({
+                        isOpen: true,
+                        title: 'Eliminar Itens',
+                        message: `Tem a certeza que deseja eliminar ${selectedFileIds.length} itens?`,
+                        confirmText: 'Eliminar',
+                        isDanger: true,
+                        onConfirm: () => {
+                            deleteFiles(selectedFileIds);
+                            clearSelection(); // This might run before deleteFiles finishes, but it's async in hook. Should be fine.
+                        }
+                    });
                 }
                 if (e.key === 'F2') {
                     const fileToRename = files.find(f => f.id === selectedFileIds[0]);
@@ -163,13 +176,22 @@ function App() {
                 setRenameName(target.name);
                 break;
             case 'delete':
-                if (confirm(`Tem a certeza que deseja eliminar "${target.name}"?`)) {
-                    deleteFiles([target.id]);
-                }
+                setConfirmModal({
+                    isOpen: true,
+                    title: 'Eliminar Ficheiro',
+                    message: `Tem a certeza que deseja eliminar "${target.name}"?`,
+                    confirmText: 'Eliminar',
+                    isDanger: true,
+                    onConfirm: () => deleteFiles([target.id])
+                });
                 break;
             case 'new-folder':
-                const name = prompt("Nome da Pasta:", "Nova Pasta");
-                if (name) createFolder(name);
+                setInputModal({
+                    isOpen: true,
+                    title: 'Nova Pasta',
+                    initialValue: 'Nova Pasta',
+                    onConfirm: (name) => createFolder(name)
+                });
                 break;
             case 'upload': document.getElementById('file-upload-input').click(); break;
             case 'refresh': alert("Atualizado!"); break;
@@ -191,31 +213,52 @@ function App() {
 
     const handleFileInputChange = async (e) => {
         if (e.target.files && e.target.files.length > 0) {
-            // Reusing the drag-drop logic wrapper or creating a synthetic event
-            // For simplicity, let's use a small helper or just adapt useDragDrop to accept file list directly if needed.
-            // But useDragDrop expects a drag event. Let's manually trigger the internal logic or expose a helper.
-            // *Self-correction*: useDragDrop exposes `isDragging`, etc. logic, but relies on `addFiles`. 
-            // I should just call `addFiles` manually here after processing.
-            // Simulating similar logic to useDragDrop for file reading:
-
             const newFiles = [];
             for (let i = 0; i < e.target.files.length; i++) {
                 const file = e.target.files[i];
-                if (file.size > 2 * 1024 * 1024) { alert(`O ficheiro ${file.name} é demasiado grande.`); continue; }
 
-                const content = await new Promise((resolve) => {
-                    const reader = new FileReader();
-                    reader.onload = (e) => resolve(e.target.result);
-                    if (file.type.startsWith('image/') || file.type.startsWith('text/')) reader.readAsDataURL(file);
-                    else resolve(null);
-                });
+                // Read file as ArrayBuffer for binary support or DataURL for preview if needed
+                // For now, keeping DataURL as per original implementation for images/text, 
+                // but for large binary files this might be memory intensive. 
+                // IndexedDB can store Blobs directly.
+                // However, existing code expects 'content' property.
+                // Let's store the File object itself if possible or read as needed.
+                // The current implementation seems to expect 'content' to be a string (DataURL or text).
+                // For very large files, reading into a string string might crash browser memory.
+                // But user asked to use IndexedDB to support it.
+                // Dexie supports storing native File/Blob objects.
+                // Let's try to store the 'file' object in 'content' if it's not text/image, 
+                // or just modify the schema/logic to handle Blobs.
+                // But to be safe and "just work" with current UI (which might try to render content?), 
+                // let's stick to reading it but maybe don't crash.
+                // Actually, reading 500MB into a DataURL string is a bad idea.
+                // Better: Store the File object (Blob) directly in 'content' or a new field.
+                // The current UI seems to use 'content' for preview.
+                // The 'useFileSystem' hook's 'addFiles' just takes the object and puts it in DB.
+                // Let's read small files for preview, and keep large files as Blobs.
+
+                let content = null;
+                if (file.size < 5 * 1024 * 1024) { // Read content for small files only (< 5MB)
+                    content = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        if (file.type.startsWith('image/') || file.type.startsWith('text/')) reader.readAsDataURL(file);
+                        else resolve(null);
+                    });
+                } else {
+                    // For large files, we might want to store the Blob reference or just null for now
+                    // creating ObjectURL for preview if needed.
+                    // But for persistence, we need the data.
+                    // Dexie can store the File object directly!
+                    content = file;
+                }
 
                 newFiles.push({
                     id: `file-${Date.now()}-${i}`,
                     parentId: currentFolderId,
                     name: file.name,
                     type: file.type.startsWith('image/') ? 'image' : file.type.includes('pdf') ? 'pdf' : 'file',
-                    size: (file.size / 1024).toFixed(2) + ' KB',
+                    size: file.size > 1024 * 1024 ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : (file.size / 1024).toFixed(2) + ' KB',
                     date: 'Hoje',
                     content: content
                 });
@@ -225,15 +268,25 @@ function App() {
     };
 
     const handleCreateFolderClick = () => {
-        const name = prompt("Nome da Pasta:", "Nova Pasta");
-        if (name) createFolder(name);
+        setInputModal({
+            isOpen: true,
+            title: 'Nova Pasta',
+            initialValue: 'Nova Pasta',
+            onConfirm: (name) => createFolder(name)
+        });
     };
 
     const handleCreateWorkspace = () => {
-        const name = prompt("Nome do novo Workspace:");
-        if (!name) return;
-        const connections = [{ id: `conn-${Date.now()}`, serviceId: 'browser', name: 'Local', used: '0', total: '500MB' }];
-        createWorkspace(name, connections);
+        setInputModal({
+            isOpen: true,
+            title: 'Novo Workspace',
+            initialValue: '',
+            placeholder: 'Nome do Workspace',
+            onConfirm: (name) => {
+                const connections = [{ id: `conn-${Date.now()}`, serviceId: 'browser', name: 'Local', used: '0', total: '500MB' }];
+                createWorkspace(name, connections);
+            }
+        });
     };
 
 
@@ -253,6 +306,25 @@ function App() {
             {previewFile && <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />}
             {showSettings && <SettingsScreen onClose={() => setShowSettings(false)} data={{ workspaces, files }} onUpdateData={updateWorkspaceData} onResetSystem={resetSystem} activeWorkspaceId={activeWorkspace} />}
             {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} target={contextMenu.target} onClose={() => setContextMenu(null)} onAction={handleContextAction} />}
+
+            <InputModal
+                isOpen={inputModal.isOpen}
+                title={inputModal.title}
+                initialValue={inputModal.initialValue}
+                placeholder={inputModal.placeholder}
+                onClose={() => setInputModal({ ...inputModal, isOpen: false })}
+                onConfirm={inputModal.onConfirm}
+            />
+
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                confirmText={confirmModal.confirmText}
+                isDanger={confirmModal.isDanger}
+                onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                onConfirm={confirmModal.onConfirm}
+            />
 
             <input type="file" id="file-upload-input" className="hidden" multiple onChange={handleFileInputChange} />
 
