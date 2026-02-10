@@ -78,7 +78,8 @@ const GridItem = memo(({ columnIndex, rowIndex, style, data }) => {
                 transition={{ duration: 0.2 }}
                 {...bind}
                 onMouseDown={(e) => { e.stopPropagation(); bind.onMouseDown && bind.onMouseDown(e); }}
-                onDoubleClick={() => onNavigate(file)}
+                onDoubleClick={() => { console.log('[FileGrid] Double Click on:', file.name); onNavigate(file); }}
+                onClick={() => console.log('[FileGrid] Click on:', file.name)}
                 onContextMenu={(e) => onContextMenu(e, file)}
                 title={file.name}
                 role="gridcell"

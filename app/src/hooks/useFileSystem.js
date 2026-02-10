@@ -689,6 +689,11 @@ export function useFileSystemInternal() {
     const downloadFile = useCallback(async (file) => {
         if (!file) return;
 
+        // If folder, use Zip download
+        if (file.type === 'folder') {
+            return downloadFiles([file.id]);
+        }
+
         let content = file.content;
 
         // Fetch content if missing
@@ -983,36 +988,88 @@ export function useFileSystemInternal() {
 
         try {
             const zip = new JSZip();
-            const folder = zip.folder("files");
+
+            // Helper for recursion
+            const processItem = async (item, currentZipFolder) => {
+                if (!item) return;
+
+                if (item.type === 'folder') {
+                    const newZipFolder = currentZipFolder.folder(item.name);
+                    // Fetch children
+                    // We must use provider.list because children might not be in state
+                    if (provider && typeof provider.list === 'function') {
+                        try {
+                            // Note: We might need to handle pagination if folders are huge, 
+                            // but generic list() usually gives first page. 
+                            // For simplicity, we assume generic list returns reasonable amount or we loop tokens.
+                            // But provider.list signature varies?
+                            // IndexedDBProject.list(folderId) -> array or object?
+                            // GoogleDriveProvider.list(folderId) -> { files: [] }
+                            // Let's normalize.
+
+                            let children = [];
+                            const result = await provider.list(item.id);
+
+                            if (Array.isArray(result)) {
+                                children = result;
+                            } else if (result && Array.isArray(result.files)) {
+                                children = result.files;
+                            }
+
+                            for (const child of children) {
+                                await processItem(child, newZipFolder);
+                            }
+                        } catch (err) {
+                            console.error(`Error listing folder ${item.name}:`, err);
+                        }
+                    }
+                } else {
+                    // It's a file
+                    try {
+                        let content = item.content;
+                        if ((content === undefined || content === null) && provider) {
+                            content = await provider.getContent(item.id);
+                        }
+
+                        if (content) {
+                            currentZipFolder.file(item.name, content);
+                        }
+                    } catch (err) {
+                        console.error(`Error downloading file ${item.name}:`, err);
+                    }
+                }
+            };
 
             let successCount = 0;
-            let failCount = 0;
 
             for (const id of fileIds) {
-                const file = files.find(f => f.id === id);
-                if (!file) continue;
-
-                if (file.type === 'folder') {
-                    continue;
+                // Find file in state or fetch if needed (usually in state if selected)
+                let file = files.find(f => f.id === id);
+                if (!file) {
+                    // Try getting from DB or Provider if we have a way? 
+                    // For downloadFiles(ids), ids usually come from selection in current view.
+                    // But if deep fetch needed?
+                    if (db && db.files) {
+                        try {
+                            file = await db.files.get(id);
+                        } catch (e) { /* ignore */ }
+                    }
+                    // If still not found and we have provider.get?
+                    if (!file && provider && typeof provider.get === 'function') {
+                        try {
+                            file = await provider.get(id);
+                        } catch (e) { /* ignore */ }
+                    }
                 }
 
-                try {
-                    const fileRecord = await db.files.get(id);
-                    if (fileRecord && fileRecord.content) {
-                        folder.file(fileRecord.name, fileRecord.content);
-                        successCount++;
-                    } else {
-                        failCount++;
-                    }
-
-                } catch (err) {
-                    console.error(`Erro ao adicionar ${file.name} ao ZIP:`, err);
-                    failCount++;
+                if (file) {
+                    await processItem(file, zip);
+                    successCount++;
                 }
             }
 
             if (successCount === 0) {
-                toast.error("Nenhum arquivo pôde ser baixado.", { id: toastId });
+                toast.error("Nenhum arquivo encontrado para download.", { id: toastId });
                 return;
             }
 
@@ -1020,7 +1077,7 @@ export function useFileSystemInternal() {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
             saveAs(content, `omnifiles-download-${timestamp}.zip`);
 
-            toast.success(`${successCount} arquivos baixados.`, { id: toastId });
+            toast.success("Download Concluído!", { id: toastId });
 
         } catch (error) {
             console.error("Erro ao gerar ZIP:", error);
@@ -1028,7 +1085,7 @@ export function useFileSystemInternal() {
         } finally {
             setIsProcessing(false);
         }
-    }, [files, toast]);
+    }, [files, toast, provider, db]);
 
     return {
         appState, setAppState,
@@ -1044,6 +1101,8 @@ export function useFileSystemInternal() {
         isProcessing,
         toggleStar,
         restoreFiles, permanentDeleteFiles, emptyTrash, downloadFiles,
-        loadSystem
+        restoreFiles, permanentDeleteFiles, emptyTrash, downloadFiles,
+        loadSystem,
+        db // Expose db for components like TagManager
     };
 }
