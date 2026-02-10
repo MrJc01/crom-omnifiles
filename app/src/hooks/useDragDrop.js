@@ -1,49 +1,76 @@
 import { useState, useCallback } from 'react';
 
+// Helper to scan files and folders recursively
+const scanFiles = async (item, path = '') => {
+    if (item.isFile) {
+        return new Promise((resolve) => {
+            item.file((file) => {
+                resolve([{ file, path: path + file.name }]);
+            });
+        });
+    } else if (item.isDirectory) {
+        const dirReader = item.createReader();
+        const entries = await new Promise((resolve) => {
+            dirReader.readEntries((entries) => resolve(entries));
+        });
+
+        const results = await Promise.all(
+            entries.map(entry => scanFiles(entry, path + item.name + '/'))
+        );
+        return results.flat();
+    }
+    return [];
+};
+
 export function useDragDrop(onDropFiles) {
     const [isDragging, setIsDragging] = useState(false);
 
     const handleDragOver = useCallback((e) => {
         e.preventDefault();
+        e.stopPropagation();
         setIsDragging(true);
     }, []);
 
     const handleDragLeave = useCallback((e) => {
         e.preventDefault();
+        e.stopPropagation();
         setIsDragging(false);
     }, []);
 
-    const handleDrop = useCallback(async (e, currentFolderId) => {
+    const handleDrop = useCallback(async (e) => {
         e.preventDefault();
+        e.stopPropagation();
         setIsDragging(false);
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            const newFiles = [];
-            for (let i = 0; i < e.dataTransfer.files.length; i++) {
-                const file = e.dataTransfer.files[i];
-                // Simple size check, can be expanded
-                if (file.size > 2 * 1024 * 1024) {
-                    alert(`O ficheiro ${file.name} é demasiado grande para o modo local (>2MB).`);
-                    continue;
+
+        const items = e.dataTransfer.items;
+        if (items && items.length > 0) {
+            const promises = [];
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i].webkitGetAsEntry();
+                if (item) {
+                    promises.push(scanFiles(item));
+                } else if (items[i].kind === 'file') {
+                    // Fallback for non-webkit or if webkitGetAsEntry fails?
+                    // actually items[i].getAsFile() returns File, no path.
+                    // But webkitGetAsEntry is standard for structure.
+                    // If it returns null, we skip?
                 }
-
-                const content = await new Promise((resolve) => {
-                    const reader = new FileReader();
-                    reader.onload = (e) => resolve(e.target.result);
-                    if (file.type.startsWith('image/') || file.type.startsWith('text/')) reader.readAsDataURL(file);
-                    else resolve(null);
-                });
-
-                newFiles.push({
-                    id: `file-${Date.now()}-${i}`,
-                    parentId: currentFolderId,
-                    name: file.name,
-                    type: file.type.startsWith('image/') ? 'image' : file.type.includes('pdf') ? 'pdf' : 'file',
-                    size: (file.size / 1024).toFixed(2) + ' KB',
-                    date: 'Hoje',
-                    content: content
-                });
             }
-            if (newFiles.length > 0) onDropFiles(newFiles);
+
+            try {
+                const results = await Promise.all(promises);
+                const allFiles = results.flat();
+                if (allFiles.length > 0) {
+                    onDropFiles(allFiles); // Calls importDroppedFiles with [{file, path}]
+                }
+            } catch (err) {
+                console.error("Failed to scan dropped files:", err);
+            }
+        } else if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            // Fallback for browsers not supporting items API (rare now)
+            // Just treat as flat files
+            const files = Array.from(e.dataTransfer.files).map(f => ({ file: f, path: f.name }));
+            onDropFiles(files);
         }
     }, [onDropFiles]);
 

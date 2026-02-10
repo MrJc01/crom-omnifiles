@@ -39,6 +39,7 @@ export const FileGrid = ({
                         onClick={(e) => { e.stopPropagation(); onSelect(file.id, e.ctrlKey || e.metaKey); }}
                         onDoubleClick={() => onNavigate(file)}
                         onContextMenu={(e) => onContextMenu(e, file)}
+                        title={file.name}
                         className={`group relative flex flex-col items-center justify-start p-4 rounded-xl border transition-all cursor-pointer h-[140px] select-none ${selectedFileIds.includes(file.id) ? 'bg-blue-600/20 border-blue-500/50' : 'bg-transparent border-transparent hover:bg-slate-800 hover:border-slate-700'}`}
                     >
                         <div className="mb-3 pointer-events-none"><FileIcon type={file.type} className="w-12 h-12" /></div>

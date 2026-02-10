@@ -25,11 +25,11 @@ function App() {
         currentFolderId,
         navigate, navigateBreadcrumb, navigateBack, navigateForward, navigateToPath,
         switchWorkspace, createWorkspace, updateWorkspaceData, resetSystem,
-        createFolder, deleteFiles, renameFile, addFiles
+        createFolder, deleteFiles, renameFile, addFiles, importDroppedFiles
     } = useFileSystem();
 
     const { selectedFileIds, setSelectedFileIds, toggleSelection, clearSelection } = useSelection();
-    const { isDragging, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(addFiles);
+    const { isDragging, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(importDroppedFiles);
 
     const [viewMode, setViewMode] = useState('grid');
     const [searchQuery, setSearchQuery] = useState('');
@@ -83,11 +83,14 @@ function App() {
 
     // Filter and Sort Files
     const displayedFiles = useMemo(() => {
-        if (!currentFolderId) return [];
-        let filtered = files.filter(f => f.parentId === currentFolderId);
+        let filtered = [];
 
         if (searchQuery.trim() !== '') {
-            filtered = files.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
+            // Search in entire workspace
+            filtered = files.filter(f => f.workspaceId === activeWorkspace && f.name.toLowerCase().includes(searchQuery.toLowerCase()));
+        } else {
+            // Browse current folder (root if currentFolderId is null)
+            filtered = files.filter(f => f.workspaceId === activeWorkspace && f.parentId === currentFolderId);
         }
 
         filtered.sort((a, b) => {
@@ -102,7 +105,7 @@ function App() {
         });
 
         return filtered;
-    }, [files, currentFolderId, searchQuery, sortConfig]);
+    }, [files, currentFolderId, searchQuery, sortConfig, activeWorkspace]);
 
     const requestSort = (key) => {
         let direction = 'asc';
@@ -242,8 +245,20 @@ function App() {
                     content = await new Promise((resolve) => {
                         const reader = new FileReader();
                         reader.onload = (e) => resolve(e.target.result);
-                        if (file.type.startsWith('image/') || file.type.startsWith('text/')) reader.readAsDataURL(file);
-                        else resolve(null);
+                        if (file.type.startsWith('text/') ||
+                            file.type === 'application/json' ||
+                            file.type === 'application/javascript' ||
+                            file.name.endsWith('.js') ||
+                            file.name.endsWith('.jsx') ||
+                            file.name.endsWith('.html') ||
+                            file.name.endsWith('.css') ||
+                            file.name.endsWith('.md')) {
+                            reader.readAsText(file);
+                        } else if (file.type.startsWith('image/')) {
+                            reader.readAsDataURL(file);
+                        } else {
+                            resolve(file); // Store blob for others
+                        }
                     });
                 } else {
                     // For large files, we might want to store the Blob reference or just null for now

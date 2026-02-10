@@ -86,35 +86,49 @@ const OmniDebug = {
                 return '';
             };
 
+            const getElementPath = (el) => {
+                const path = [];
+                while (el && el.nodeType === Node.ELEMENT_NODE) {
+                    let selector = el.nodeName.toLowerCase();
+                    if (el.id) {
+                        selector += '#' + el.id;
+                    } else {
+                        const className = getSafeClassName(el);
+                        if (className) {
+                            selector += '.' + className.split(' ').join('.');
+                        }
+                    }
+                    path.unshift(selector);
+                    el = el.parentNode;
+                }
+                return path.join(' > ');
+            };
+
             const info = {
                 tagName: interactive.tagName,
                 id: interactive.id || null,
                 className: getSafeClassName(interactive),
                 text: interactive.innerText?.substring(0, 50).replace(/\n/g, ' ') || target.innerText?.substring(0, 20).replace(/\n/g, ' ') || null,
                 title: interactive.title || interactive.getAttribute('aria-label') || null,
+                path: getElementPath(target), // Log path of original target
                 x: e.clientX,
                 y: e.clientY
             };
 
             const idStr = info.id ? `#${info.id}` : '';
-            const classStr = info.className ? `.${info.className.split(' ').slice(0, 2).join('.')}` : ''; // First 2 classes
+            const classStr = info.className ? `.${info.className.split(' ').slice(0, 2).join('.')}` : '';
             const textStr = info.text ? ` "${info.text}"` : '';
-            const titleStr = info.title ? ` [${info.title}]` : '';
 
-            this.log('click', `Click on <${interactive.tagName}${idStr}${classStr}>${textStr}${titleStr}`, info);
+            // Console formatting
+            this.log('click', `Click on ${info.path}`, info);
         }, true);
 
-        // Monitor Functions if exposed
-        if (window.OmniFiles) {
-            const actions = window.OmniFiles.actions;
-            for (const key in actions) {
-                if (typeof actions[key] === 'function') {
-                    // Simple wrapper logging (careful with recursion if actions call other actions)
-                    // For safety, we won't wrap automatically here to avoid side-effects in React
-                    // But we can log manual calls.
-                }
-            }
-        }
+        // Debug helper to print clickable element under mouse
+        window.OmniDebug.identify = () => {
+            document.addEventListener('mouseover', (e) => {
+                console.log('Hover:', e.target);
+            }, { once: true });
+        };
 
         console.log('%c🚀 OmniDebug initialized! Use OmniDebug.toggle() to toggle',
             'font-size: 12px; color: #3b82f6;');

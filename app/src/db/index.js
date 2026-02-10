@@ -4,17 +4,16 @@ export class OmniFilesDatabase extends Dexie {
     constructor() {
         super('OmniFilesDB');
 
-        // Define tables and indexes
+        // Configuração do Schema
+        // workspaces: id (string, PK), name (indexado)
+        // files: id (string, PK), parentId (indexado para busca), workspaceId (indexado)
         this.version(1).stores({
-            workspaces: '++id, name', // Primary key and indexed props
-            files: '++id, parentId, workspaceId'
+            workspaces: '&id, name',
+            files: '&id, parentId, workspaceId'
         });
-
-        // The following lines are needed if we want to use the classes
-        // Workspace and File mapped to the tables.
-        // For now, we'll use plain objects to keep it simple and consistent with previous implementation.
     }
 
+    // Inicialização opcional caso o DB esteja vazio
     async initializeDefaults() {
         const workspaceCount = await this.workspaces.count();
         if (workspaceCount === 0) {
