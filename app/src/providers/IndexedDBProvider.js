@@ -86,4 +86,34 @@ export class IndexedDBProvider extends FileSystemProvider {
         const file = await db.files.get(id);
         return file ? file.content : null;
     }
+
+    async listStarred() {
+        return await db.files
+            .where({ workspaceId: this.workspaceId })
+            .filter(f => f.isStarred && !f.deletedAt)
+            .toArray();
+    }
+
+    async listRecent() {
+        // Return all files (not folders) in workspace, not deleted.
+        // Sorting will be done by UI or we can try here if date format allows.
+        return await db.files
+            .where('workspaceId').equals(this.workspaceId)
+            .filter(f => !f.deletedAt && f.type !== 'folder')
+            .toArray();
+    }
+
+    async listTrash() {
+        return await db.files
+            .where('workspaceId').equals(this.workspaceId)
+            .filter(f => !!f.deletedAt)
+            .toArray();
+    }
+
+    async listByTag(tagId) {
+        return await db.files
+            .where('workspaceId').equals(this.workspaceId)
+            .filter(f => f.tags && f.tags.includes(tagId) && !f.deletedAt)
+            .toArray();
+    }
 }

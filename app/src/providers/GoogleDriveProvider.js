@@ -117,10 +117,13 @@ export class GoogleDriveProvider extends FileSystemProvider {
 
     // Implement createFolder, saveFiles, delete, rename similarly...
     async createFolder(name, parentId) {
+        // Fix: If parentId is a connection ID (local app concept), map to 'root' for Drive
+        const actualParent = (parentId && parentId.startsWith('conn-')) ? 'root' : (parentId || 'root');
+
         const metadata = {
             name: name,
             mimeType: 'application/vnd.google-apps.folder',
-            parents: [parentId || 'root']
+            parents: [actualParent]
         };
 
         const response = await fetch('https://www.googleapis.com/drive/v3/files', {
@@ -132,13 +135,154 @@ export class GoogleDriveProvider extends FileSystemProvider {
             body: JSON.stringify(metadata)
         });
 
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Drive Create Folder Error: ${response.status} - ${errorText}`);
+        }
+
         const data = await response.json();
         return {
             id: data.id,
             name: data.name,
             type: 'folder',
-            parentId: parentId || 'root',
-            workspaceId: this.workspaceId
+            parentId: parentId, // Keep original parentId for local state consistency
+            workspaceId: this.workspaceId,
+            date: new Date().toLocaleDateString(),
+            size: '--'
         };
+    }
+
+    async delete(ids) {
+        // Permanent Delete
+        for (const id of ids) {
+            await fetch(`https://www.googleapis.com/drive/v3/files/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+        }
+    }
+
+    async trash(ids) {
+        // Soft Delete
+        for (const id of ids) {
+            await fetch(`https://www.googleapis.com/drive/v3/files/${id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ trashed: true })
+            });
+        }
+    }
+
+    async rename(id, newName) {
+        await fetch(`https://www.googleapis.com/drive/v3/files/${id}`, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': `Bearer ${this.token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ name: newName })
+        });
+    }
+
+    async saveFiles(files) {
+        const uploaded = [];
+        for (const file of files) {
+            const actualParent = (file.parentId && file.parentId.startsWith('conn-')) ? 'root' : (file.parentId || 'root');
+
+            const metadata = {
+                name: file.name,
+                parents: [actualParent]
+            };
+
+            const formData = new FormData();
+            formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+
+            let contentBlob = file.content;
+            if (typeof contentBlob === 'string') {
+                contentBlob = new Blob([contentBlob], { type: 'text/plain' });
+            } else if (!(contentBlob instanceof Blob) && !(contentBlob instanceof File)) {
+                // Should be Blob or File, but if missing, empty blob
+                contentBlob = new Blob([''], { type: 'text/plain' });
+            }
+            formData.append('file', contentBlob);
+
+            const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`
+                },
+                body: formData
+            });
+
+            if (!response.ok) {
+                console.error(`Upload error for ${file.name}:`, await response.text());
+                continue;
+            }
+
+            const data = await response.json();
+            uploaded.push({
+                id: data.id,
+                name: data.name,
+                type: this.mapMimeType(data.mimeType),
+                parentId: file.parentId, // Keep local parent ID
+                workspaceId: this.workspaceId,
+                date: new Date().toLocaleDateString(),
+                size: this.formatSize(data.size || file.sizeRaw || 0),
+                content: file.content // Keep content locally if needed
+            });
+        }
+        return uploaded;
+    }
+
+    // Helper for custom queries
+    async _performList(query) {
+        console.log(`[Drive] Query: ${query}`);
+        const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id, name, mimeType, size, modifiedTime, iconLink, thumbnailLink)&pageSize=100`, {
+            headers: {
+                'Authorization': `Bearer ${this.token}`
+            }
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            console.error(`[Drive] API Error: ${response.status}`, errorBody);
+            throw new Error(`Drive API Error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.files.map(f => ({
+            id: f.id,
+            parentId: 'root', // Logic for parentId might be complex here, so Default to root or unknown
+            workspaceId: this.workspaceId,
+            name: f.name,
+            type: this.mapMimeType(f.mimeType),
+            size: f.size ? this.formatSize(f.size) : '--',
+            date: new Date(f.modifiedTime).toLocaleDateString(),
+            mimeType: f.mimeType,
+            thumbnail: f.thumbnailLink,
+            icon: f.iconLink
+        }));
+    }
+
+    async listStarred() {
+        return await this._performList("starred = true and trashed = false");
+    }
+
+    async listRecent() {
+        // Recent files (ignoring folders?)
+        return await this._performList("trashed = false and mimeType != 'application/vnd.google-apps.folder' order by modifiedTime desc");
+    }
+
+    async listTrash() {
+        return await this._performList("trashed = true");
+    }
+
+    async listByTag(tagId) {
+        // Tag support on Drive is limited. For now, return empty.
+        // potentially use properties or description search in future
+        return [];
     }
 }

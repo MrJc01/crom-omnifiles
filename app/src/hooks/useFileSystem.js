@@ -7,7 +7,7 @@ import { useFileProcessor } from './useFileProcessor';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
-export function useFileSystem() {
+export function useFileSystemInternal() {
     const [appState, setAppState] = useState('loading'); // 'loading', 'welcome', 'setup-workspace', 'setup-providers', 'explorer', 'error'
     const [workspaces, setWorkspaces] = useState([]);
     const [files, setFiles] = useState([]);
@@ -143,20 +143,26 @@ export function useFileSystem() {
     const navigate = useCallback(async (item) => {
         if (!item) return;
 
+        console.log(`[FileSystem] Navigate to: ${item.name} (${item.type})`, item);
+
         if (item.type !== 'folder') {
             // It's a file - open preview
+            console.log("[FileSystem] Opening file preview...");
 
             // Check if content is already loaded
             if (item.content !== undefined && item.content !== null) {
+                console.log("[FileSystem] Content already loaded.");
                 setPreviewFile(item);
                 return;
             }
 
             // Fetch content from provider if missing
             if (provider && typeof provider.getContent === 'function') {
+                console.log("[FileSystem] Fetching content via provider...");
                 const loadingToast = toast.loading(`Baixando ${item.name}...`);
                 try {
                     const content = await provider.getContent(item.id);
+                    console.log("[FileSystem] Content fetched:", content);
                     const updatedFile = { ...item, content };
 
                     // Update state to cache content
@@ -167,9 +173,10 @@ export function useFileSystem() {
                 } catch (error) {
                     console.error("Error fetching file content:", error);
                     toast.dismiss(loadingToast);
-                    toast.error("Erro ao baixar o conteúdo do arquivo.");
+                    toast.error(`Erro ao abrir arquivo: ${error.message}`);
                 }
             } else {
+                console.log("[FileSystem] No provider getContent, opening as is.");
                 // No provider or no getContent method - try opening anyway (might be empty)
                 setPreviewFile(item);
             }
@@ -377,24 +384,39 @@ export function useFileSystem() {
         // setAppState('loading-files'); // Optional
 
         try {
-            let fetchId = currentFolderId;
-            let isConnectionRoot = false;
+            let filesData = [];
 
-            // SPECIAL CASE: Connection Root
-            if (activeWorkspaceObj?.connections?.some(c => c.id === currentFolderId)) {
-                fetchId = null; // 'root' for the provider
-                isConnectionRoot = true;
+            // 1. Special Views handling
+            if (currentFolderId === 'favorites') {
+                filesData = await provider.listStarred();
+            } else if (currentFolderId === 'recent') {
+                filesData = await provider.listRecent();
+            } else if (currentFolderId === 'trash') {
+                filesData = await provider.listTrash();
+            } else if (currentFolderId && currentFolderId.startsWith('tag-')) {
+                const tagId = currentFolderId.replace('tag-', '');
+                filesData = await provider.listByTag(tagId);
+            } else {
+                // 2. Standard Folder / Root handling
+                let fetchId = currentFolderId;
+                let isConnectionRoot = false;
+
+                // SPECIAL CASE: Connection Root
+                if (activeWorkspaceObj?.connections?.some(c => c.id === currentFolderId)) {
+                    fetchId = null; // 'root' for the provider
+                    isConnectionRoot = true;
+                }
+
+                filesData = await provider.list(fetchId);
+
+                // Fix: Override parentId if we are at connection root so App.jsx displays them
+                if (isConnectionRoot && Array.isArray(filesData)) {
+                    filesData.forEach(f => f.parentId = currentFolderId);
+                }
             }
 
-            const filesData = await provider.list(fetchId);
             console.log(`[FileSystem] Loaded ${filesData?.length} items.`);
-
-            // Fix: Override parentId if we are at connection root so App.jsx displays them
-            if (isConnectionRoot && Array.isArray(filesData)) {
-                filesData.forEach(f => f.parentId = currentFolderId);
-            }
-
-            setFiles(filesData);
+            setFiles(filesData || []);
         } catch (error) {
             console.error("Erro ao carregar arquivos:", error);
             if (error.message && error.message.includes("Sessão Expirada")) {
@@ -436,8 +458,13 @@ export function useFileSystem() {
         setIsProcessing(true);
         const timestamp = Date.now();
         try {
-            // Update in DB (soft delete)
+            // Update in DB (soft delete metadata)
             await Promise.all(ids.map(id => db.files.update(id, { deletedAt: timestamp })));
+
+            // Update Provider (Trash in Cloud)
+            if (provider.trash) {
+                await provider.trash(ids);
+            }
 
             // Update local state
             setFiles(prev => prev.map(f => ids.includes(f.id) ? { ...f, deletedAt: timestamp } : f));

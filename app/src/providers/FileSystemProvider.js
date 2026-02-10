@@ -62,4 +62,37 @@ export class FileSystemProvider {
     async getContent(id) {
         throw new Error('Method not implemented.');
     }
+
+    /**
+     * List starred files (Favorites).
+     * @returns {Promise<Array>}
+     */
+    async listStarred() {
+        throw new Error('Method not implemented.');
+    }
+
+    /**
+     * List recent files.
+     * @returns {Promise<Array>}
+     */
+    async listRecent() {
+        throw new Error('Method not implemented.');
+    }
+
+    /**
+     * List trashed files.
+     * @returns {Promise<Array>}
+     */
+    async listTrash() {
+        throw new Error('Method not implemented.');
+    }
+
+    /**
+     * List files by tag.
+     * @param {string} tagId
+     * @returns {Promise<Array>}
+     */
+    async listByTag(tagId) {
+        throw new Error('Method not implemented.');
+    }
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Tag, Check, Edit2 } from 'lucide-react';
-import { useFileSystem } from '../../hooks/useFileSystem';
+import { useFileSystem } from '../../context/FileSystemContext';
 
 export const TagManager = ({ onClose }) => {
     const { activeWorkspace, db } = useFileSystem();

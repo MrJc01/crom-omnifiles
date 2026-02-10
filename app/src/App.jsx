@@ -188,60 +188,52 @@ const AppLayout = () => {
     const displayedFiles = useMemo(() => {
         let filtered = [];
 
+        // 1. Search (Always client-side filter on current view)
         if (searchQuery.trim() !== '') {
-            // Search in entire workspace
-            filtered = files.filter(f => f.workspaceId === activeWorkspace && f.name.toLowerCase().includes(searchQuery.toLowerCase()));
-        } else if (currentFolderId === 'favorites') {
-            // Browse Favorites
-            filtered = files.filter(f => f.workspaceId === activeWorkspace && f.isStarred && !f.deletedAt);
-        } else if (currentFolderId === 'recent') {
-            // Browse Recent - Show all files, but we'll sort them by date in the sort block 
-            // or ensure they are sorted here if sortConfig is default.
-            filtered = files.filter(f => f.workspaceId === activeWorkspace && !f.deletedAt && f.type !== 'folder'); // Recents usually implies files, not folders
-        } else if (currentFolderId === 'trash') {
-            // Browse Trash
-            filtered = files.filter(f => f.workspaceId === activeWorkspace && f.deletedAt);
-        } else if (activeTagId) {
-            // Browse by Tag
-            filtered = files.filter(f => f.workspaceId === activeWorkspace && f.tags && f.tags.includes(activeTagId) && !f.deletedAt);
-        } else {
-            // Browse current folder (root if currentFolderId is null)
+            filtered = files.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()));
+        }
+        // 2. Special Views (Favorites, Recent, Trash, Tags)
+        // Since useFileSystem now fetches exactly what we need for these views, we just use 'files'.
+        // We still trust 'files' to be the correct list for the current context.
+        else if (['favorites', 'recent', 'trash'].includes(currentFolderId) || (currentFolderId && currentFolderId.startsWith('tag-'))) {
+            filtered = files;
+        }
+        // 3. Root View with Connections (Special Case)
+        else if (currentFolderId === null && activeWorkspaceObj && activeWorkspaceObj.connections && activeWorkspaceObj.connections.length > 0) {
+            // Map connections to fake file objects
+            filtered = activeWorkspaceObj.connections.map(conn => ({
+                id: conn.id,
+                name: conn.name,
+                type: 'folder', // Treat as folder for navigation
+                isConnection: true, // Flag for potential custom rendering
 
-            // SPECIAL CASE: Root View for Workspaces with Connections
-            // If we are at root (currentFolderId === null) AND the workspace has connections,
-            // we should display the connections as "Drives/Folders" INSTEAD of files.
-            // User Request: "na pasta 'origem' é para mostrar apenas conexões"
+                // Metadata for Grid
+                size: conn.total || '--',
+                date: '--',
+                tags: [],
+                isStarred: false,
 
-            if (currentFolderId === null && activeWorkspaceObj && activeWorkspaceObj.connections && activeWorkspaceObj.connections.length > 0) {
-                // Map connections to fake file objects
-                filtered = activeWorkspaceObj.connections.map(conn => ({
-                    id: conn.id,
-                    name: conn.name,
-                    type: 'folder', // Treat as folder for navigation
-                    isConnection: true, // Flag for potential custom rendering
-
-                    // Metadata for Grid
-                    size: conn.total || '--',
-                    date: '--',
-                    tags: [],
-                    isStarred: false,
-
-                    // Helper properties
-                    workspaceId: activeWorkspace,
-                    parentId: null
-                }));
-                // We do NOT include loose files here, per user request.
-            } else {
-                // Normal behavior (subfolders or local workspace root)
-                filtered = files.filter(f => f.workspaceId === activeWorkspace && f.parentId === currentFolderId && !f.deletedAt);
-            }
+                // Helper properties
+                workspaceId: activeWorkspace,
+                parentId: null
+            }));
+        }
+        // 4. Standard Folder View (Local/Drive)
+        else {
+            // For standard folders, useFileSystem returns content of that folder.
+            // But we might want to double-check parentId matching to be safe?
+            // Actually, for Drive, parents are exact. For Local, queries are exact.
+            // So 'files' should be correct.
+            // BUT: If strict about parentId, we can filter.
+            // However, with the Drive 'connection root' parentId fix, filtering might hide items if not careful.
+            // Let's trust 'files' if we are confident useFileSystem loads correctly.
+            // Current 'useFileSystem' loads 'provider.list(id)'.
+            filtered = files;
         }
 
-        filtered.sort((a, b) => {
-            // Always Folders First? (Standard behavior)
-            // If user wants strict type sorting, folder is just a type.
-            // But usually folders > files.
-            // Let's implement: Folders always on top, then sort by key.
+        // Apply Sorting
+        return filtered.sort((a, b) => {
+            // Always Folders First
             if (a.type === 'folder' && b.type !== 'folder') return -1;
             if (a.type !== 'folder' && b.type === 'folder') return 1;
 

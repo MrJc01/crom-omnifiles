@@ -1,10 +1,22 @@
-import React, { createContext, useContext } from 'react';
-import { useFileSystem as useFileSystemHook } from '../hooks/useFileSystem';
+import React, { createContext, useContext, useEffect } from 'react';
+import { useFileSystemInternal } from '../hooks/useFileSystem';
 
 const FileSystemContext = createContext(null);
 
 export const FileSystemProvider = ({ children }) => {
-    const fs = useFileSystemHook();
+    const fs = useFileSystemInternal();
+
+    // Debug Context Value
+    useEffect(() => {
+        if (!fs) {
+            console.error("FileSystemProvider: FS Context is null/undefined!");
+        } else {
+            console.log("FileSystemProvider: FS Context initialized.");
+        }
+    }, [fs]);
+
+    // Safety check: if fs is somehow null/undefined (e.g. hook crash?), provide empty or fallback?
+    // But hook shouldn't return null.
 
     return (
         <FileSystemContext.Provider value={fs}>

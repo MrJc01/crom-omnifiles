@@ -29,8 +29,14 @@ export class OmniFilesDatabase extends Dexie {
             files: '&id, parentId, workspaceId, name, isStarred, *tags' // *tags = multi-entry index
         });
 
-        // Add 'deletedAt' index for Trash System v5
+        // Added 'deletedAt' index for Trash System v5
         this.version(5).stores({
+            files: '&id, parentId, workspaceId, name, isStarred, *tags, deletedAt'
+        });
+
+        // Version 6: Ensure tags table exists (Fix for missing table error)
+        this.version(6).stores({
+            tags: '&id, name',
             files: '&id, parentId, workspaceId, name, isStarred, *tags, deletedAt'
         });
     }
