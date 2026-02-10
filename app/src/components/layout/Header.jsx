@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, ArrowRight, Search, Plus, LayoutGrid, List as ListIcon, Menu, PanelLeft, Info } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Search, Plus, LayoutGrid, List as ListIcon, Menu, PanelLeft, Info, Tag } from 'lucide-react';
 import { Breadcrumb } from '../core/Breadcrumb';
 import { useTranslation } from 'react-i18next';
 import PropTypes from 'prop-types';
@@ -20,7 +20,8 @@ export const Header = ({
     isSidebarOpen,
     isProcessing,
     showDetails,
-    onToggleDetails
+    onToggleDetails,
+    onOpenTagManager
 }) => {
     const { t } = useTranslation();
 
@@ -59,6 +60,13 @@ export const Header = ({
                     <button onClick={() => setViewMode('grid')} className={`p-1.5 rounded ${viewMode === 'grid' ? 'bg-slate-600 text-white' : 'text-slate-400'}`}><LayoutGrid size={16} /></button>
                     <button onClick={() => setViewMode('list')} className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-slate-600 text-white' : 'text-slate-400'}`}><ListIcon size={16} /></button>
                 </div>
+                <button
+                    onClick={onOpenTagManager}
+                    className="p-1.5 rounded-md hover:bg-slate-800 text-slate-400"
+                    title="Gerenciar Tags"
+                >
+                    <Tag size={18} />
+                </button>
                 <button
                     onClick={onToggleDetails}
                     className={`p-1.5 rounded-md hover:bg-slate-800 border border-transparent ${showDetails ? 'bg-slate-800 text-blue-400 border-blue-500/30' : 'text-slate-400'}`}

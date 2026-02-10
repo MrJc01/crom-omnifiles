@@ -12,6 +12,7 @@ import { Header } from './components/layout/Header';
 import { FileGrid } from './components/core/FileGrid';
 import { FilePreviewModal } from './components/core/FilePreviewModal';
 import { ContextMenu } from './components/core/ContextMenu';
+import { TagManager } from './components/core/TagManager'; // Imported
 import { WorkspaceSetup } from './components/settings/WorkspaceSetup';
 import { ProviderSetup } from './components/settings/ProviderSetup';
 import { SettingsScreen } from './components/settings/SettingsScreen';
@@ -145,6 +146,7 @@ const AppLayout = () => {
         if (saved !== null) return JSON.parse(saved);
         return false;
     });
+    const [showTagManager, setShowTagManager] = useState(false);
 
     const toggleSidebar = () => {
         const newState = !isSidebarOpen;
@@ -193,15 +195,9 @@ const AppLayout = () => {
             // Browse Favorites
             filtered = files.filter(f => f.workspaceId === activeWorkspace && f.isStarred && !f.deletedAt);
         } else if (currentFolderId === 'recent') {
-            // Browse Recent (All files in workspace, sorted by date)
-            // Ideally we should filter out folders? "Recentes" usually implies modified files.
-            // Let's show everything for now, but forced sort by date desc.
-            filtered = files.filter(f => f.workspaceId === activeWorkspace && !f.deletedAt);
-            // Override sort config temporarily? Or just let user sort?
-            // "Recentes" demands date sorting.
-            // We can enforce it in the sort logic below if we want, or just rely on Sidebar setting it.
-            // But Sidebar only set it once. If user changes sort, it stays.
-            // Let's filter here.
+            // Browse Recent - Show all files, but we'll sort them by date in the sort block 
+            // or ensure they are sorted here if sortConfig is default.
+            filtered = files.filter(f => f.workspaceId === activeWorkspace && !f.deletedAt && f.type !== 'folder'); // Recents usually implies files, not folders
         } else if (currentFolderId === 'trash') {
             // Browse Trash
             filtered = files.filter(f => f.workspaceId === activeWorkspace && f.deletedAt);
@@ -697,6 +693,7 @@ const AppLayout = () => {
                     isProcessing={isProcessing}
                     showDetails={showDetails}
                     onToggleDetails={toggleDetails}
+                    onOpenTagManager={() => setShowTagManager(true)}
                 />
 
                 <div className="flex-1 overflow-y-auto p-4 relative" onClick={clearSelection}>
@@ -728,6 +725,8 @@ const AppLayout = () => {
                     onToggleTag={toggleFileTag}
                 />
             </main>
+
+            {showTagManager && <TagManager onClose={() => setShowTagManager(false)} />}
         </div>
     );
 };

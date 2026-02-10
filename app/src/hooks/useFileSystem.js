@@ -659,21 +659,34 @@ export function useFileSystem() {
     }, [currentFolderId, activeWorkspace, files, provider, processFileInBackground]);
 
     // 7. Download File
-    const downloadFile = useCallback((file) => {
+    const downloadFile = useCallback(async (file) => {
         if (!file) return;
 
+        let content = file.content;
+
+        // Fetch content if missing
+        if ((content === undefined || content === null) && provider) {
+            const loadingToast = toast.loading(`Baixando ${file.name}...`);
+            try {
+                content = await provider.getContent(file.id);
+                // We don't necessarily update state here, just download
+                toast.dismiss(loadingToast);
+            } catch (error) {
+                console.error("Error downloading file content:", error);
+                toast.dismiss(loadingToast);
+                toast.error("Erro ao baixar arquivo.");
+                return;
+            }
+        }
+
         let blob = null;
-        if (file.content instanceof Blob || file.content instanceof File) {
-            blob = file.content;
-        } else if (typeof file.content === 'string') {
-            // If content is string, create blob (mostly for legacy text files or code)
-            blob = new Blob([file.content], { type: 'text/plain' });
-            // If it was a DataURL (legacy images), we might need to convert differently,
-            // but going forward we use Blobs.
-            // For now, let's assume text if string, unless it starts with data:
-            if (file.content.startsWith('data:')) {
+        if (content instanceof Blob || content instanceof File) {
+            blob = content;
+        } else if (typeof content === 'string') {
+            blob = new Blob([content], { type: 'text/plain' });
+            if (content.startsWith('data:')) {
                 // Fetch data url to blob
-                fetch(file.content).then(res => res.blob()).then(b => {
+                fetch(content).then(res => res.blob()).then(b => {
                     const url = URL.createObjectURL(b);
                     const a = document.createElement('a');
                     a.href = url;
@@ -684,7 +697,7 @@ export function useFileSystem() {
                 return;
             }
         } else {
-            toast.error("Arquivo inválido para download.");
+            toast.error("Arquivo vazio ou inválido para download.");
             return;
         }
 
@@ -697,7 +710,24 @@ export function useFileSystem() {
             URL.revokeObjectURL(url);
             toast.success("Download iniciado.");
         }
-    }, []);
+    }, [provider, toast]);
+
+    // 7.1 Toggle Star (Favorites)
+    const toggleStar = useCallback(async (file) => {
+        if (!file) return;
+        try {
+            const newStatus = !file.isStarred;
+            await db.files.update(file.id, { isStarred: newStatus });
+
+            setFiles(prev => prev.map(f => f.id === file.id ? { ...f, isStarred: newStatus } : f));
+
+            if (newStatus) toast.success("Adicionado aos Favoritos");
+            else toast.success("Removido dos Favoritos");
+        } catch (error) {
+            console.error("Error toggling star:", error);
+            toast.error("Erro ao atualizar favoritos.");
+        }
+    }, [setFiles, toast]);
 
     // Update Workspace Data (Settings)
     const updateWorkspaceData = async (newData) => {
@@ -918,33 +948,6 @@ export function useFileSystem() {
 
 
 
-    // 8. Toggle Star (Favorites)
-    const toggleStar = useCallback(async (filesToToggle) => {
-        if (!provider) return;
-        const items = Array.isArray(filesToToggle) ? filesToToggle : [filesToToggle];
-        const updates = items.map(f => ({
-            key: f.id,
-            changes: { isStarred: !f.isStarred }
-        }));
-
-        try {
-            // Bulk update in DB
-            await Promise.all(updates.map(u => db.files.update(u.key, u.changes)));
-
-            // Update local state
-            setFiles(prev => prev.map(f => {
-                const update = updates.find(u => u.key === f.id);
-                return update ? { ...f, ...update.changes } : f;
-            }));
-
-            const action = items[0].isStarred ? "removido dos favoritos" : "adicionado aos favoritos";
-            toast.success(`${items.length > 1 ? 'Itens atualizaram' : 'Item ' + action}`);
-        } catch (error) {
-            console.error("Erro ao favoritar:", error);
-            toast.error("Erro ao atualizar favoritos.");
-        }
-    }, [provider]);
-
     const downloadFiles = useCallback(async (fileIds) => {
         if (!fileIds || fileIds.length === 0) return;
 
@@ -998,7 +1001,7 @@ export function useFileSystem() {
         } finally {
             setIsProcessing(false);
         }
-    }, [files]);
+    }, [files, toast]);
 
     return {
         appState, setAppState,
@@ -1010,10 +1013,10 @@ export function useFileSystem() {
         navigate, navigateBreadcrumb, navigateBack, navigateForward, navigateToPath, navigateUp,
         switchWorkspace, createWorkspace, openLocalFolder, updateWorkspaceData, resetSystem,
         createFolder, deleteFiles, renameFile, addFiles, importDroppedFiles, downloadFile,
-        pasteFiles, // Exporting paste function
-        isProcessing, // Exporting loading state
-        toggleStar, // Exporting favorites action
-        restoreFiles, permanentDeleteFiles, emptyTrash, downloadFiles, // Exporting downloadFiles
-        loadSystem // Exporting loadSystem for manual refresh
+        pasteFiles,
+        isProcessing,
+        toggleStar,
+        restoreFiles, permanentDeleteFiles, emptyTrash, downloadFiles,
+        loadSystem
     };
 }
