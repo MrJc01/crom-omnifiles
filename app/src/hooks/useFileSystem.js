@@ -661,12 +661,55 @@ export function useFileSystemInternal() {
             }
 
             if (newFolders.length > 0) {
-                if (provider) await provider.saveFiles(newFolders);
-                setFiles(prev => [...prev, ...newFolders]);
+                if (provider) {
+                    // Update folders with provider response (containing real IDs) if applicable
+                    const savedFolders = await provider.saveFiles(newFolders);
+                    if (savedFolders && savedFolders.length > 0) {
+                        setFiles(prev => [...prev, ...savedFolders]);
+                        // Also update folder cache if needed, but cache uses path -> id mapping.
+                        // If ID changes, we might need to update cache or let it refresh?
+                        // For drive, paths are not unique keys, IDs are.
+                        // Complex: if we created a folder and got a new ID, subsequent file creations 
+                        // in that folder (recursive upload) need the NEW ID.
+
+                        // Recursive upload logic (ensureFolder) returns currentParent (local ID).
+                        // If provider swaps it for a real ID, we must map OldID -> NewID for children.
+                        const idMap = {};
+                        newFolders.forEach((nf, i) => {
+                            if (savedFolders[i]) idMap[nf.id] = savedFolders[i].id;
+                        });
+
+                        // Update parentIds in newFiles if they referred to temporary folder IDs
+                        newFiles.forEach(nf => {
+                            if (idMap[nf.parentId]) nf.parentId = idMap[nf.parentId];
+                        });
+                    } else {
+                        setFiles(prev => [...prev, ...newFolders]);
+                    }
+                } else {
+                    setFiles(prev => [...prev, ...newFolders]);
+                }
             }
+
             if (newFiles.length > 0) {
-                if (provider) await provider.saveFiles(newFiles);
-                setFiles(prev => [...prev, ...newFiles]);
+                if (provider) {
+                    const savedFiles = await provider.saveFiles(newFiles);
+                    if (savedFiles && savedFiles.length > 0) {
+                        setFiles(prev => [...prev, ...savedFiles]);
+
+                        // Update filesToProcess with new IDs if needed for background processing?
+                        // Background processing usually deals with thumbnails/content analysis.
+                        // It uses 'record'. We should update 'record.id' to real ID.
+                        // Assuming order is preserved.
+                        savedFiles.forEach((sf, i) => {
+                            if (filesToProcess[i]) filesToProcess[i].record.id = sf.id;
+                        });
+                    } else {
+                        setFiles(prev => [...prev, ...newFiles]);
+                    }
+                } else {
+                    setFiles(prev => [...prev, ...newFiles]);
+                }
             }
             toast.dismiss(loadingToast);
             toast.success(`${newFiles.length} arquivos importados!`);

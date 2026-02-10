@@ -442,72 +442,15 @@ const AppLayout = () => {
         }
     };
 
-    const handleFileInputChange = async (e) => {
+    const handleFileInputChange = (e) => {
         if (e.target.files && e.target.files.length > 0) {
-            const newFiles = [];
-            for (let i = 0; i < e.target.files.length; i++) {
-                const file = e.target.files[i];
-
-                // Read file as ArrayBuffer for binary support or DataURL for preview if needed
-                // For now, keeping DataURL as per original implementation for images/text, 
-                // but for large binary files this might be memory intensive. 
-                // IndexedDB can store Blobs directly.
-                // However, existing code expects 'content' property.
-                // Let's store the File object itself if possible or read as needed.
-                // The current implementation seems to expect 'content' to be a string (DataURL or text).
-                // For very large files, reading into a string string might crash browser memory.
-                // But user asked to use IndexedDB to support it.
-                // Dexie supports storing native File/Blob objects.
-                // Let's try to store the 'file' object in 'content' if it's not text/image, 
-                // or just modify the schema/logic to handle Blobs.
-                // But to be safe and "just work" with current UI (which might try to render content?), 
-                // let's stick to reading it but maybe don't crash.
-                // Actually, reading 500MB into a DataURL string is a bad idea.
-                // Better: Store the File object (Blob) directly in 'content' or a new field.
-                // The current UI seems to use 'content' for preview.
-                // The 'useFileSystem' hook's 'addFiles' just takes the object and puts it in DB.
-                // Let's read small files for preview, and keep large files as Blobs.
-
-                let content = null;
-                if (file.size < 5 * 1024 * 1024) { // Read content for small files only (< 5MB)
-                    content = await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onload = (e) => resolve(e.target.result);
-                        if (file.type.startsWith('text/') ||
-                            file.type === 'application/json' ||
-                            file.type === 'application/javascript' ||
-                            file.name.endsWith('.js') ||
-                            file.name.endsWith('.jsx') ||
-                            file.name.endsWith('.html') ||
-                            file.name.endsWith('.css') ||
-                            file.name.endsWith('.md')) {
-                            reader.readAsText(file);
-                        } else if (file.type.startsWith('image/')) {
-                            reader.readAsDataURL(file);
-                        } else {
-                            resolve(file); // Store blob for others
-                        }
-                    });
-                } else {
-                    // For large files, we might want to store the Blob reference or just null for now
-                    // creating ObjectURL for preview if needed.
-                    // But for persistence, we need the data.
-                    // Dexie can store the File object directly!
-                    content = file;
-                }
-
-                newFiles.push({
-                    id: `file-${Date.now()}-${i}`,
-                    parentId: currentFolderId,
-                    name: file.name,
-                    type: file.type.startsWith('image/') ? 'image' : file.type.includes('pdf') ? 'pdf' : 'file',
-                    size: file.size > 1024 * 1024 ? (file.size / 1024 / 1024).toFixed(2) + ' MB' : (file.size / 1024).toFixed(2) + ' KB',
-                    sizeRaw: file.size,
-                    date: new Date().toLocaleDateString(),
-                    content: content
-                });
-            }
-            if (newFiles.length > 0) addFiles(newFiles);
+            const items = Array.from(e.target.files).map(f => ({
+                file: f,
+                path: f.webkitRelativePath || f.name
+            }));
+            importDroppedFiles(items);
+            // Reset input value to allow selecting same files again
+            e.target.value = '';
         }
     };
 
@@ -516,6 +459,41 @@ const AppLayout = () => {
             title: 'Nova Pasta',
             initialValue: 'Nova Pasta',
             onConfirm: (name) => createFolder(name)
+        });
+    };
+
+    const handleCreateFileClick = () => {
+        openInput({
+            title: 'Novo Arquivo',
+            initialValue: 'sem-titulo.txt',
+            placeholder: 'nome.extensao',
+            onConfirm: (name) => {
+                // Determine type based on extension
+                // Logic is inside addFiles/importDroppedFiles usually, but addFiles takes a file object.
+                // We'll create a dummy file object.
+                const type = name.includes('.') ? name.split('.').pop() : 'txt';
+                // Simple mapping
+                const mimeMap = {
+                    'txt': 'text/plain',
+                    'md': 'text/markdown',
+                    'js': 'application/javascript',
+                    'json': 'application/json',
+                    'html': 'text/html',
+                    'css': 'text/css'
+                };
+                const mimeType = mimeMap[type] || 'text/plain';
+
+                const file = new File([""], name, { type: mimeType });
+
+                // Use importDroppedFiles to reuse logic? 
+                // Or addFiles directly? 
+                // addFiles expects standard object structure we usually build.
+                // context/FileSystemContext.jsx -> useFileSystem.js -> addFiles
+                // addFiles expects array of { id, parentId, name, type, size, date, content, ... }
+                // Let's manually construct it to match useFileSystem expectations or use a helper.
+                // Actually, importDroppedFiles handles everything including processing.
+                importDroppedFiles([{ file, path: name }]);
+            }
         });
     };
 
@@ -678,6 +656,8 @@ const AppLayout = () => {
                     searchQuery={searchQuery}
                     setSearchQuery={setSearchQuery}
                     onCreateFolder={handleCreateFolderClick}
+                    onCreateFile={handleCreateFileClick}
+                    onUpload={handleFileInputChange} // Reusing for both
                     viewMode={viewMode}
                     setViewMode={handleSetViewMode}
                     onToggleSidebar={toggleSidebar}
