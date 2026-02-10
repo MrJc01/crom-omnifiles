@@ -165,7 +165,7 @@ const ListItem = memo(({ index, style, data }) => {
                     ${copiedFileIds?.has(file.id) ? 'border border-dashed border-slate-500/50' : ''}
                 `}
             >
-                <div className="col-span-6 flex items-center gap-3 overflow-hidden pointer-events-none">
+                <div className="col-span-5 flex items-center gap-3 overflow-hidden pointer-events-none">
                     <div className="relative">
                         <FileIcon type={file.type} className="w-5 h-5 flex-shrink-0" />
                         {file.isStarred && <Star size={8} className="absolute -top-1 -right-1 text-yellow-400 fill-yellow-400" />}
@@ -183,8 +183,11 @@ const ListItem = memo(({ index, style, data }) => {
                     )}
                 </div>
 
+                <div className="col-span-2 text-slate-500 text-xs pointer-events-none truncate">
+                    {file.type === 'folder' ? 'Pasta' : file.name.split('.').pop().toUpperCase()}
+                </div>
                 <div className="col-span-2 text-slate-500 text-xs pointer-events-none">{file.size}</div>
-                <div className="col-span-3 text-slate-500 text-xs pointer-events-none">{file.date}</div>
+                <div className="col-span-2 text-slate-500 text-xs pointer-events-none">{file.date}</div>
                 <div className="col-span-1 flex justify-end opacity-0 group-hover:opacity-100">
                     <MoreVertical size={14} className="text-slate-400" onClick={(e) => onContextMenu(e, file)} />
                 </div>
@@ -342,9 +345,10 @@ export const FileGrid = ({
             {/* List Header (Only for List View) */}
             {viewMode === 'list' && (
                 <div className="grid grid-cols-12 gap-4 px-4 py-2 border-b border-slate-800 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-900 z-10 flex-shrink-0">
-                    <div className="col-span-6 flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => requestSort('name')}>{t('grid.listHeader.name')} <SortIcon col="name" sortConfig={sortConfig} /></div>
+                    <div className="col-span-5 flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => requestSort('name')}>{t('grid.listHeader.name')} <SortIcon col="name" sortConfig={sortConfig} /></div>
+                    <div className="col-span-2 flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => requestSort('type')}>{t('grid.listHeader.type')} <SortIcon col="type" sortConfig={sortConfig} /></div>
                     <div className="col-span-2 flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => requestSort('size')}>{t('grid.listHeader.size')} <SortIcon col="size" sortConfig={sortConfig} /></div>
-                    <div className="col-span-3 flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => requestSort('date')}>{t('grid.listHeader.date')} <SortIcon col="date" sortConfig={sortConfig} /></div>
+                    <div className="col-span-2 flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => requestSort('date')}>{t('grid.listHeader.date')} <SortIcon col="date" sortConfig={sortConfig} /></div>
                     <div className="col-span-1"></div>
                 </div>
             )}
@@ -381,8 +385,8 @@ export const FileGrid = ({
                     ) : (
                         <List
                             height={height - 40}
-                            itemCount={itemCount}
-                            itemSize={LIST_ITEM_HEIGHT}
+                            rowCount={itemCount}
+                            rowHeight={LIST_ITEM_HEIGHT}
                             width={width}
                             className="pb-20 focus:outline-none"
                             id="file-list-container"

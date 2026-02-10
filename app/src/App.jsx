@@ -242,8 +242,24 @@ const AppLayout = () => {
         }
 
         filtered.sort((a, b) => {
+            // Always Folders First? (Standard behavior)
+            // If user wants strict type sorting, folder is just a type.
+            // But usually folders > files.
+            // Let's implement: Folders always on top, then sort by key.
+            if (a.type === 'folder' && b.type !== 'folder') return -1;
+            if (a.type !== 'folder' && b.type === 'folder') return 1;
+
             let valA = a[sortConfig.key] || '';
             let valB = b[sortConfig.key] || '';
+
+            // Unique handling for size (convert string to number if possible for correct sort)
+            // Current size is string "1.2 MB".
+            // We have `sizeRaw` in some files.
+            if (sortConfig.key === 'size') {
+                valA = a.sizeRaw || 0;
+                valB = b.sizeRaw || 0;
+            }
+
             if (typeof valA === 'string') valA = valA.toLowerCase();
             if (typeof valB === 'string') valB = valB.toLowerCase();
 

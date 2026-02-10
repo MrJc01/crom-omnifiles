@@ -140,18 +140,54 @@ export function useFileSystem() {
         }
     };
 
-    const navigate = useCallback((folder) => {
-        if (folder.type !== 'folder') return setPreviewFile(folder);
-        const newPath = [...currentPath, { id: folder.id, name: folder.name }];
-        const newHistory = history.slice(0, historyIndex + 1);
-        newHistory.push(newPath);
-        setHistory(newHistory);
-        setHistoryIndex(newHistory.length - 1);
+    const navigate = useCallback(async (item) => {
+        if (!item) return;
+
+        if (item.type !== 'folder') {
+            // It's a file - open preview
+
+            // Check if content is already loaded
+            if (item.content !== undefined && item.content !== null) {
+                setPreviewFile(item);
+                return;
+            }
+
+            // Fetch content from provider if missing
+            if (provider && typeof provider.getContent === 'function') {
+                const loadingToast = toast.loading(`Baixando ${item.name}...`);
+                try {
+                    const content = await provider.getContent(item.id);
+                    const updatedFile = { ...item, content };
+
+                    // Update state to cache content
+                    setFiles(prev => prev.map(f => f.id === item.id ? updatedFile : f));
+
+                    setPreviewFile(updatedFile);
+                    toast.dismiss(loadingToast);
+                } catch (error) {
+                    console.error("Error fetching file content:", error);
+                    toast.dismiss(loadingToast);
+                    toast.error("Erro ao baixar o conteúdo do arquivo.");
+                }
+            } else {
+                // No provider or no getContent method - try opening anyway (might be empty)
+                setPreviewFile(item);
+            }
+            return;
+        }
+
+        // Folder Navigation
+        const newPath = [...currentPath, { id: item.id, name: item.name }];
         setCurrentPath(newPath);
 
-        // Sync URL
-        updateHash(activeWorkspace, folder.id);
-    }, [currentPath, history, historyIndex, activeWorkspace]);
+        // Update URL Hash
+        // We use a safe/url-friendly version of name? No, just ID is enough for logic, 
+        // but typically hash routing wants hierarchy.
+        // Our handleHashChange uses /ws/WSID/folder/FOLDERID
+        // So we strictly need the ID.
+        window.location.hash = `#/ws/${activeWorkspace}/folder/${item.id}`;
+
+    }, [currentPath, activeWorkspace, provider, toast, setFiles, setPreviewFile]);
 
     const navigateBreadcrumb = useCallback((idx) => {
         const newPath = currentPath.slice(0, idx + 1);
@@ -796,8 +832,8 @@ export function useFileSystem() {
                     }
 
                     // Handle Real Folders
-                    if (files.length === 0) {
-                        // Could be initial load. 
+                    // 1. Optimization: If we are already at this path (e.g. from navigate()), do nothing
+                    if (currentPath.length > 0 && currentPath[currentPath.length - 1].id === targetFolderId) {
                         return;
                     }
 
@@ -810,42 +846,53 @@ export function useFileSystem() {
                         return;
                     }
 
-                    const targetFolder = files.find(f => f.id === targetFolderId && f.type === 'folder');
+                    // 2. Try to find folder in current files (fast)
+                    let targetFolder = files.find(f => f.id === targetFolderId && f.type === 'folder');
+
+                    // 3. If not found, fetch from DB (Slow/Reload/Deep Link)
+                    if (!targetFolder) {
+                        try {
+                            targetFolder = await db.files.get(targetFolderId);
+                        } catch (err) {
+                            console.error("Error fetching folder from DB:", err);
+                        }
+                    }
 
                     if (!targetFolder) {
-                        // 404 - Folder not found
-                        console.warn(`Folder ${targetFolderId} not found.`);
-                        // toast.error("Pasta não encontrada. Redirecionando para raiz.");
-                        // Redirect to root of workspace
-                        // window.location.hash = `#/ws/${wsId}/folder/root`;
-
-                        // FIX: Don't redirect immediately if we are just loading?
-                        // But we checked files.length === 0 above.
-                        // If files are loaded and folder is not found, then it's a real 404.
-                        // Let's keep redirect but maybe less aggressive toast?
-                        window.location.hash = `#/ws/${wsId}/folder/root`;
+                        // 404 - Folder truly not found
+                        console.warn(`Folder ${targetFolderId} not found in state or DB.`);
+                        // Only redirect if we are sure (e.g. DB lookup failed)
+                        // window.location.hash = `#/ws/${wsId}/folder/root`; 
+                        // Let's go to root safely
+                        setCurrentPath([]);
                         return;
                     }
 
-                    // Build Breadcrumbs (Traverse Up)
+                    // 4. Build Breadcrumbs (Traverse Up)
                     const newPath = [];
                     let current = targetFolder;
-                    while (current) {
+                    let depth = 0;
+
+                    while (current && depth < 20) { // Safety break
                         newPath.unshift({ id: current.id, name: current.name });
-                        if (!current.parentId) break; // Should not happen for subfolders if root is null
-                        const parent = files.find(f => f.id === current.parentId);
+
+                        if (!current.parentId) break;
+
+                        // Try to find parent in files or DB
+                        let parent = files.find(f => f.id === current.parentId);
+                        if (!parent) {
+                            try {
+                                parent = await db.files.get(current.parentId);
+                            } catch (e) {
+                                // ignore
+                            }
+                        }
+
                         current = parent;
+                        depth++;
                     }
 
                     setCurrentPath(newPath);
-                    // Update history internal state to match?
-                    // We shouldn't PUSH to internal history if we just handled a browser action?
-                    // Or maybe we treat it as a "jump".
-                    // For simply syncing state on reload/back/forward:
-                    // We don't necessarily update history stack here, 
-                    // unless we want to allow "Back" within the app to work.
-                    // But if we use browser back, app history might get out of sync.
-                    // That's a larger issue. For now, let's just ensure CurrentPath is correct.
 
                 } else {
                     // Root
