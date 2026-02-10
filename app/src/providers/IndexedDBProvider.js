@@ -52,7 +52,7 @@ export class IndexedDBProvider extends FileSystemProvider {
             name,
             type: 'folder',
             size: '--',
-            date: 'Hoje'
+            date: new Date().toLocaleDateString()
         };
         await db.files.put(newFolder);
         return newFolder;

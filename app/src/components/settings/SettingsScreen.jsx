@@ -1,28 +1,73 @@
-import { useState, useEffect } from 'react';
-import { Settings, Briefcase, Plug, Monitor, X, Trash2, PlusCircle, LogOut } from 'lucide-react';
+import { useState } from 'react';
+import { Settings, Briefcase, Plug, Monitor, X, Trash2, PlusCircle, LogOut, Tag } from 'lucide-react';
 import { SERVICE_CATALOG } from '../../constants/services';
 import { AddServiceModal } from './AddServiceModal';
 import { ConfirmModal } from '../core/ConfirmModal';
+import { TagManager } from './TagManager';
+import { useToast } from '../../hooks/useToast';
 
-export const SettingsScreen = ({ onClose, data, onUpdateData, onResetSystem, activeWorkspaceId }) => {
+const WorkspaceConfigPanel = ({ workspace, onSave, onDelete }) => {
+    const [name, setName] = useState(workspace.name);
+
+    return (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <h2 className="text-2xl font-bold text-white flex items-center gap-2"><Briefcase className="text-orange-400" /> Workspace: {workspace.name}</h2>
+            <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+                <label className="block text-sm font-medium text-slate-400 mb-2">Nome</label>
+                <div className="flex gap-4">
+                    <input
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none"
+                    />
+                    <button onClick={() => onSave(name)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-medium">Salvar</button>
+                </div>
+            </div>
+            <div className="bg-red-900/10 rounded-xl p-6 border border-red-900/30">
+                <h3 className="text-red-400 font-bold mb-2">Zona de Perigo</h3>
+                <button onClick={onDelete} className="text-red-400 hover:text-red-300 text-sm font-medium border border-red-900/50 hover:bg-red-900/20 px-4 py-2 rounded-lg transition-colors">Excluir Workspace</button>
+            </div>
+        </div>
+    );
+};
+
+export const SettingsScreen = ({ onClose, data, onUpdateData, onResetSystem, activeWorkspaceId, tagActions }) => {
     const [activeTab, setActiveTab] = useState('workspace-config');
     const [isAddingService, setIsAddingService] = useState(false);
-    const [editingWsName, setEditingWsName] = useState('');
     const [confirmModal, setConfirmModal] = useState({ isOpen: false, title: '', message: '', onConfirm: () => { }, isDanger: false });
     const currentWs = data.workspaces.find(w => w.id === activeWorkspaceId) || data.workspaces[0];
+    const toast = useToast();
 
-    useEffect(() => { if (currentWs) setEditingWsName(currentWs.name); }, [currentWs]);
+    // Removed useEffect for editingWsName sync - handled by key in WorkspaceConfigPanel
 
-    const handleSaveWsName = () => {
-        onUpdateData({ workspaces: data.workspaces.map(w => w.id === currentWs.id ? { ...w, name: editingWsName } : w) });
-        // Alert also needs replacement or just ignore for now as it's info.
-        // User asked for "input" which usually implies interaction blocking. simple alert is technically blocking.
-        // I'll leave alert for now to focus on the confirms which are critical. 
-        alert('Nome atualizado!');
+    const handleSaveWsName = (newName) => {
+        onUpdateData({ workspaces: data.workspaces.map(w => w.id === currentWs.id ? { ...w, name: newName } : w) });
+        toast.success('Nome atualizado!');
     };
-    const handleAddConnection = (service, customName) => {
-        const newConnection = { id: `conn-${Date.now()}`, serviceId: service.id, name: customName, used: '0KB', total: 'Unlimited' };
-        onUpdateData({ workspaces: data.workspaces.map(w => w.id === currentWs.id ? { ...w, connections: [...(w.connections || []), newConnection] } : w) });
+
+    const handleAddConnection = async (service, customName, authData) => {
+        if (!currentWs) {
+            toast.error("Erro: Workspace não encontrado.");
+            return;
+        }
+        try {
+            console.log("Adicionando conexão:", service.name, customName);
+            const newConnection = {
+                id: `conn-${Date.now()}`,
+                serviceId: service.id,
+                name: customName,
+                used: '0KB',
+                total: 'Unlimited',
+                ...authData
+            };
+            const updatedWorkspaces = data.workspaces.map(w => w.id === currentWs.id ? { ...w, connections: [...(w.connections || []), newConnection] } : w);
+
+            await onUpdateData({ workspaces: updatedWorkspaces });
+            toast.success("Conexão adicionada com sucesso!");
+        } catch (error) {
+            console.error("Erro ao adicionar conexão:", error);
+            toast.error("Falha ao salvar conexão.");
+        }
     };
     const handleRemoveConnection = (connId) => {
         setConfirmModal({
@@ -31,13 +76,20 @@ export const SettingsScreen = ({ onClose, data, onUpdateData, onResetSystem, act
             message: 'Tem a certeza que deseja remover esta conexão?',
             confirmText: 'Remover',
             isDanger: true,
-            onConfirm: () => {
-                onUpdateData({ workspaces: data.workspaces.map(w => w.id === currentWs.id ? { ...w, connections: w.connections.filter(c => c.id !== connId) } : w) });
+            onConfirm: async () => {
+                try {
+                    const updatedWorkspaces = data.workspaces.map(w => w.id === currentWs.id ? { ...w, connections: w.connections.filter(c => c.id !== connId) } : w);
+                    await onUpdateData({ workspaces: updatedWorkspaces });
+                    toast.success("Conexão removida.");
+                } catch (error) {
+                    console.error("Erro ao remover conexão:", error);
+                    toast.error("Falha ao remover conexão.");
+                }
             }
         });
     };
     const handleDeleteWorkspace = () => {
-        if (data.workspaces.length <= 1) return alert("Mínimo de 1 workspace.");
+        if (data.workspaces.length <= 1) return toast.error("Mínimo de 1 workspace.");
         setConfirmModal({
             isOpen: true,
             title: 'Excluir Workspace',
@@ -71,6 +123,7 @@ export const SettingsScreen = ({ onClose, data, onUpdateData, onResetSystem, act
                     <div className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-4 mb-1">Workspace Atual</div>
                     <button onClick={() => setActiveTab('workspace-config')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === 'workspace-config' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><Briefcase size={18} /> Geral</button>
                     <button onClick={() => setActiveTab('connections')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === 'connections' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><Plug size={18} /> Conexões</button>
+                    <button onClick={() => setActiveTab('tags')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === 'tags' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><Tag size={18} /> Tags</button>
                     <div className="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-6 mb-1">Global</div>
                     <button onClick={() => setActiveTab('system')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === 'system' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}><Monitor size={18} /> Sistema</button>
                 </nav>
@@ -79,17 +132,12 @@ export const SettingsScreen = ({ onClose, data, onUpdateData, onResetSystem, act
                 <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white rounded-full border border-slate-800 z-10"><X size={20} /></button>
                 <div className="flex-1 overflow-y-auto p-12 max-w-4xl mx-auto w-full">
                     {activeTab === 'workspace-config' && (
-                        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                            <h2 className="text-2xl font-bold text-white flex items-center gap-2"><Briefcase className="text-orange-400" /> Workspace: {currentWs.name}</h2>
-                            <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
-                                <label className="block text-sm font-medium text-slate-400 mb-2">Nome</label>
-                                <div className="flex gap-4"><input value={editingWsName} onChange={(e) => setEditingWsName(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-white outline-none" /><button onClick={handleSaveWsName} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-medium">Salvar</button></div>
-                            </div>
-                            <div className="bg-red-900/10 rounded-xl p-6 border border-red-900/30">
-                                <h3 className="text-red-400 font-bold mb-2">Zona de Perigo</h3>
-                                <button onClick={handleDeleteWorkspace} className="text-red-400 hover:text-red-300 text-sm font-medium border border-red-900/50 hover:bg-red-900/20 px-4 py-2 rounded-lg transition-colors">Excluir Workspace</button>
-                            </div>
-                        </div>
+                        <WorkspaceConfigPanel
+                            key={currentWs.id}
+                            workspace={currentWs}
+                            onSave={handleSaveWsName}
+                            onDelete={handleDeleteWorkspace}
+                        />
                     )}
                     {activeTab === 'connections' && (
                         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
@@ -116,6 +164,34 @@ export const SettingsScreen = ({ onClose, data, onUpdateData, onResetSystem, act
                                 <p className="text-sm text-red-300/70 mb-4">Isto irá apagar todos os dados guardados localmente e reiniciar a aplicação para o ecrã de boas-vindas.</p>
                                 <button onClick={handleResetSystemClick} className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"><Trash2 size={16} /> Limpar Tudo e Reiniciar</button>
                             </div>
+
+                            <div className="bg-slate-800/50 rounded-xl p-6 border border-slate-700">
+                                <h3 className="text-slate-200 font-bold mb-4">Idioma / Language</h3>
+                                <div className="flex gap-4">
+                                    <button
+                                        onClick={() => { import('../../i18n').then(i18n => i18n.default.changeLanguage('pt')); toast.success('Idioma alterado para Português'); }}
+                                        className="px-4 py-2 bg-slate-700 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors"
+                                    >
+                                        Português
+                                    </button>
+                                    <button
+                                        onClick={() => { import('../../i18n').then(i18n => i18n.default.changeLanguage('en')); toast.success('Language changed to English'); }}
+                                        className="px-4 py-2 bg-slate-700 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors"
+                                    >
+                                        English
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {activeTab === 'tags' && (
+                        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-300">
+                            <TagManager
+                                tags={data.tags}
+                                onAddTag={tagActions.addTag}
+                                onUpdateTag={tagActions.updateTag}
+                                onDeleteTag={tagActions.deleteTag}
+                            />
                         </div>
                     )}
                 </div>
@@ -130,6 +206,6 @@ export const SettingsScreen = ({ onClose, data, onUpdateData, onResetSystem, act
                 onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
                 onConfirm={confirmModal.onConfirm}
             />
-        </div>
+        </div >
     );
 };

@@ -22,6 +22,10 @@ export function ModalProvider({ children }) {
         onConfirm: () => { }
     });
 
+    const closeInput = useCallback(() => {
+        setInputModal(prev => ({ ...prev, isOpen: false }));
+    }, []);
+
     const openInput = useCallback(({ title, initialValue = '', placeholder = '', onConfirm }) => {
         setInputModal({
             isOpen: true,
@@ -33,10 +37,10 @@ export function ModalProvider({ children }) {
                 closeInput();
             }
         });
-    }, []);
+    }, [closeInput]);
 
-    const closeInput = useCallback(() => {
-        setInputModal(prev => ({ ...prev, isOpen: false }));
+    const closeConfirm = useCallback(() => {
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
     }, []);
 
     const openConfirm = useCallback(({ title, message, confirmText = 'Confirmar', isDanger = false, onConfirm }) => {
@@ -51,11 +55,7 @@ export function ModalProvider({ children }) {
                 closeConfirm();
             }
         });
-    }, []);
-
-    const closeConfirm = useCallback(() => {
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
-    }, []);
+    }, [closeConfirm]);
 
     return (
         <ModalContext.Provider value={{ openInput, closeInput, openConfirm, closeConfirm }}>

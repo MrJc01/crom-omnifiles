@@ -1,5 +1,6 @@
 import { X, Download, FileText, Image as ImageIcon } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import DOMPurify from 'dompurify';
 
 export const FilePreviewModal = ({ file, onClose }) => {
     const [contentUrl, setContentUrl] = useState(null);
@@ -13,12 +14,12 @@ export const FilePreviewModal = ({ file, onClose }) => {
         setIsLargeFile(false);
 
         if (file.content instanceof Blob || file.content instanceof File) {
-            if (file.type === 'image') {
+            if (file.type === 'image' || file.type === 'pdf' || file.name.endsWith('.pdf')) {
                 const url = URL.createObjectURL(file.content);
                 setContentUrl(url);
                 return () => URL.revokeObjectURL(url);
             } else {
-                // For non-images that are Blobs (large text, pdf, binary)
+                // For non-images that are Blobs (large text, binary)
                 // We don't auto-render them to avoid memory issues or hanging
                 setIsLargeFile(true);
             }
@@ -95,6 +96,10 @@ export const FilePreviewModal = ({ file, onClose }) => {
                         <div className="w-full h-full flex items-center justify-center p-4">
                             <img src={contentUrl || file.content} className="max-h-full max-w-full object-contain shadow-2xl" alt={file.name} />
                         </div>
+                    ) : (file.type === 'pdf' || file.name.endsWith('.pdf')) ? (
+                        <div className="w-full h-full p-4">
+                            <iframe src={contentUrl || URL.createObjectURL(file.content)} className="w-full h-full rounded-xl border border-slate-700 bg-white" title={file.name}></iframe>
+                        </div>
                     ) : isLargeFile ? (
                         <div className="text-center p-8">
                             <div className="bg-slate-800/50 p-8 rounded-2xl border border-slate-700 inline-flex flex-col items-center">
@@ -113,6 +118,11 @@ export const FilePreviewModal = ({ file, onClose }) => {
                                 </button>
                             </div>
                         </div>
+                    ) : file.name.endsWith('.html') ? (
+                        <div
+                            className="w-full h-full overflow-auto p-4 custom-scrollbar bg-white text-black"
+                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(file.content) }}
+                        />
                     ) : (
                         <div className="w-full h-full overflow-auto p-4 custom-scrollbar bg-slate-900">
                             <pre className="text-slate-300 text-sm font-mono whitespace-pre-wrap break-words">{file.content || "Conteúdo vazio"}</pre>

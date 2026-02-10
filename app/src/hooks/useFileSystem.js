@@ -1,10 +1,14 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { db } from '../db';
-import toast from 'react-hot-toast';
+import { useToast } from './useToast';
 import { getProvider } from '../providers/ProviderFactory';
+import { GoogleDriveProvider } from '../providers/GoogleDriveProvider';
+import { useFileProcessor } from './useFileProcessor';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 
 export function useFileSystem() {
-    const [appState, setAppState] = useState('loading'); // 'loading', 'setup-workspace', 'setup-providers', 'explorer', 'error'
+    const [appState, setAppState] = useState('loading'); // 'loading', 'welcome', 'setup-workspace', 'setup-providers', 'explorer', 'error'
     const [workspaces, setWorkspaces] = useState([]);
     const [files, setFiles] = useState([]);
     const [activeWorkspace, setActiveWorkspace] = useState('');
@@ -12,57 +16,84 @@ export function useFileSystem() {
     const [history, setHistory] = useState([]);
     const [historyIndex, setHistoryIndex] = useState(-1);
     const [previewFile, setPreviewFile] = useState(null);
+    const [isProcessing, setIsProcessing] = useState(false);
+
+    const toast = useToast();
 
     const activeWorkspaceObj = useMemo(() =>
         workspaces.find(w => w.id === activeWorkspace) || workspaces[0],
         [workspaces, activeWorkspace]);
 
-    const provider = useMemo(() => getProvider(activeWorkspaceObj), [activeWorkspaceObj]);
+    const provider = useMemo(() => {
+        // 1. Check if we are inside a Connection (Drive/S3) based on Path Root
+        if (currentPath.length > 0 && activeWorkspaceObj?.connections) {
+            const rootId = currentPath[0].id;
+            const activeConnection = activeWorkspaceObj.connections.find(c => c.id === rootId);
+
+            if (activeConnection) {
+                console.log(`[FileSystem] Switching to Provider: ${activeConnection.name} (${activeConnection.serviceId})`);
+                if (activeConnection.serviceId === 'google-drive') {
+                    // Pass activeWorkspace ID so files are filtered correctly in App.jsx
+                    return new GoogleDriveProvider(activeWorkspace, activeConnection.token);
+                }
+                // Add other providers here
+            }
+        }
+        // 2. Fallback to Workspace Default Provider
+        return getProvider(activeWorkspaceObj);
+    }, [activeWorkspaceObj, currentPath, activeWorkspace]);
+
+    const { calculateHash, generateThumbnail } = useFileProcessor();
 
     // Initial Load - Carregamento Assíncrono do IndexedDB
-    useEffect(() => {
-        const loadSystem = async () => {
-            // ... logic later
-            try {
-                // Tenta inicializar defaults se necessário
-                const defaultId = await db.initializeDefaults();
+    const loadSystem = useCallback(async () => {
+        try {
+            // Tenta inicializar defaults se necessário (REMOVIDO para permitir Welcome Screen)
+            // const defaultId = await db.initializeDefaults();
+            const defaultId = null;
 
-                // Carrega todos os dados do banco
-                const storedWorkspaces = await db.workspaces.toArray();
-                const storedFiles = await db.files.toArray();
+            // Carrega todos os dados do banco
+            const storedWorkspaces = await db.workspaces.toArray();
+            const storedFiles = await db.files.toArray();
 
-                // Atualiza estado local
-                setWorkspaces(storedWorkspaces);
-                setFiles(storedFiles || []);
+            // Atualiza estado local
+            setWorkspaces(storedWorkspaces);
+            setFiles(storedFiles || []);
 
-                // Lógica de Workspace Ativo
-                if (storedWorkspaces.length > 0) {
-                    const initialWsId = defaultId || storedWorkspaces[0].id;
-                    setActiveWorkspace(initialWsId);
+            // Lógica de Workspace Ativo
+            if (storedWorkspaces.length > 0) {
+                // Try to restore from localStorage
+                const savedWsId = localStorage.getItem('omni_active_workspace');
+                const initialWsId = (savedWsId && storedWorkspaces.find(w => w.id === savedWsId))
+                    ? savedWsId
+                    : (defaultId || storedWorkspaces[0].id);
 
-                    const wsObj = storedWorkspaces.find(w => w.id === initialWsId);
-                    if (wsObj && wsObj.connections?.length > 0) {
-                        const firstConn = wsObj.connections[0];
-                        const path = [{ id: firstConn.id, name: firstConn.name }];
-                        setCurrentPath(path);
-                        setHistory([path]);
-                        setHistoryIndex(0);
-                    }
-                    setAppState('explorer');
-                } else {
-                    // Fallback para setup se não houver workspaces (embora initializeDefaults deva criar um)
-                    setWorkspaces([]);
-                    setFiles([]);
-                    setAppState('setup-workspace');
+                setActiveWorkspace(initialWsId);
+
+                const wsObj = storedWorkspaces.find(w => w.id === initialWsId);
+                if (wsObj && wsObj.connections?.length > 0) {
+                    const firstConn = wsObj.connections[0];
+                    const path = [{ id: firstConn.id, name: firstConn.name }];
+                    setCurrentPath(path);
+                    setHistory([path]);
+                    setHistoryIndex(0);
                 }
-            } catch (error) {
-                console.error("Falha ao carregar sistema de arquivos:", error);
-                setAppState('error');
+                setAppState('explorer');
+            } else {
+                // No workspaces — show welcome screen
+                setWorkspaces([]);
+                setFiles([]);
+                setAppState('welcome');
             }
-        };
-
-        loadSystem();
+        } catch (error) {
+            console.error("Falha ao carregar sistema de arquivos:", error);
+            setAppState('error');
+        }
     }, []);
+
+    useEffect(() => {
+        loadSystem();
+    }, [loadSystem]);
 
 
 
@@ -70,7 +101,45 @@ export function useFileSystem() {
         currentPath.length > 0 ? currentPath[currentPath.length - 1].id : null,
         [currentPath]);
 
+    // Helper to process file in background (Hash & Thumbnail)
+    const processFileInBackground = useCallback(async (fileRecord, fileBlob) => {
+        if (!fileBlob) return;
+
+        try {
+            // 1. Calculate Hash
+            const hash = await calculateHash(fileBlob);
+
+            // 2. Generate Thumbnail (if image)
+            let thumbnail = null;
+            if (fileRecord.type === 'image') {
+                thumbnail = await generateThumbnail(fileBlob);
+            }
+
+            // 3. Update DB & State
+            if (hash || thumbnail) {
+                const updates = {};
+                if (hash) updates.hash = hash;
+                if (thumbnail) updates.thumbnail = thumbnail;
+
+                await db.files.update(fileRecord.id, updates);
+
+                // Update local state to reflect changes (e.g. valid thumbnail)
+                setFiles(prev => prev.map(f => f.id === fileRecord.id ? { ...f, ...updates } : f));
+            }
+        } catch (err) {
+            console.error(`Processing failed for ${fileRecord.name}:`, err);
+        }
+    }, [calculateHash, generateThumbnail]);
+
     // Helpers de Navegação
+    const updateHash = (wsId, folderId) => {
+        const fId = folderId || 'root';
+        const newHash = `/ws/${wsId}/folder/${fId}`;
+        if (window.location.hash !== '#' + newHash) {
+            window.location.hash = newHash;
+        }
+    };
+
     const navigate = useCallback((folder) => {
         if (folder.type !== 'folder') return setPreviewFile(folder);
         const newPath = [...currentPath, { id: folder.id, name: folder.name }];
@@ -79,7 +148,10 @@ export function useFileSystem() {
         setHistory(newHistory);
         setHistoryIndex(newHistory.length - 1);
         setCurrentPath(newPath);
-    }, [currentPath, history, historyIndex]);
+
+        // Sync URL
+        updateHash(activeWorkspace, folder.id);
+    }, [currentPath, history, historyIndex, activeWorkspace]);
 
     const navigateBreadcrumb = useCallback((idx) => {
         const newPath = currentPath.slice(0, idx + 1);
@@ -88,21 +160,37 @@ export function useFileSystem() {
         setHistory(newHistory);
         setHistoryIndex(newHistory.length - 1);
         setCurrentPath(newPath);
-    }, [currentPath, history, historyIndex]);
+
+        // Sync URL
+        const folderId = newPath.length > 0 ? newPath[newPath.length - 1].id : null;
+        updateHash(activeWorkspace, folderId);
+    }, [currentPath, history, historyIndex, activeWorkspace]);
 
     const navigateBack = useCallback(() => {
         if (historyIndex > 0) {
-            setHistoryIndex(prev => prev - 1);
-            setCurrentPath(history[historyIndex - 1]);
+            const newIndex = historyIndex - 1;
+            const prevPath = history[newIndex];
+            setHistoryIndex(newIndex);
+            setCurrentPath(prevPath);
+
+            // Sync URL hash
+            const folderId = prevPath.length > 0 ? prevPath[prevPath.length - 1].id : null;
+            updateHash(activeWorkspace, folderId);
         }
-    }, [history, historyIndex]);
+    }, [history, historyIndex, activeWorkspace]);
 
     const navigateForward = useCallback(() => {
         if (historyIndex < history.length - 1) {
-            setHistoryIndex(prev => prev + 1);
-            setCurrentPath(history[historyIndex + 1]);
+            const newIndex = historyIndex + 1;
+            const nextPath = history[newIndex];
+            setHistoryIndex(newIndex);
+            setCurrentPath(nextPath);
+
+            // Sync URL hash
+            const folderId = nextPath.length > 0 ? nextPath[nextPath.length - 1].id : null;
+            updateHash(activeWorkspace, folderId);
         }
-    }, [history, historyIndex]);
+    }, [history, historyIndex, activeWorkspace]);
 
     const navigateToPath = useCallback((path) => {
         const newHistory = history.slice(0, historyIndex + 1);
@@ -110,10 +198,23 @@ export function useFileSystem() {
         setHistory(newHistory);
         setHistoryIndex(newHistory.length - 1);
         setCurrentPath(path);
-    }, [history, historyIndex]);
+
+        const folderId = path.length > 0 ? path[path.length - 1].id : null;
+        updateHash(activeWorkspace, folderId);
+    }, [history, historyIndex, activeWorkspace]);
+
+    const navigateUp = useCallback(() => {
+        if (currentPath.length > 1) {
+            navigateBreadcrumb(currentPath.length - 2);
+        } else if (currentPath.length === 1) {
+            // Navigate to root
+            navigateToPath([]);
+        }
+    }, [currentPath, navigateBreadcrumb, navigateToPath]);
 
     const switchWorkspace = useCallback((wsId) => {
         setActiveWorkspace(wsId);
+        localStorage.setItem('omni_active_workspace', wsId); // Persist
         const ws = workspaces.find(w => w.id === wsId);
         if (ws && ws.connections.length > 0) {
             const conn = ws.connections[0];
@@ -121,7 +222,11 @@ export function useFileSystem() {
             setCurrentPath(path);
             setHistory([path]);
             setHistoryIndex(0);
-        } else { setCurrentPath([]); }
+            updateHash(wsId, conn.id);
+        } else {
+            setCurrentPath([]);
+            updateHash(wsId, null);
+        }
     }, [workspaces]);
 
     // --- ACTIONS (CRUD com IndexedDB) ---
@@ -131,7 +236,7 @@ export function useFileSystem() {
         const newWs = {
             id: `ws-${Date.now()}`, // String ID Explícito
             name,
-            type: 'custom',
+            type: 'local',
             color: 'bg-blue-600',
             connections
         };
@@ -157,9 +262,126 @@ export function useFileSystem() {
         }
     };
 
+    // 1.1 Open Local Folder (File System Access API)
+    const openLocalFolder = async () => {
+        try {
+            if (!window.showDirectoryPicker) {
+                toast.error("Seu navegador não suporta acesso a pastas locais.");
+                return;
+            }
+
+            const handle = await window.showDirectoryPicker();
+            // Check if workspace already exists for this folder? 
+            // For now, clean simple logic: create new workspace mode.
+
+            const wsId = `ws-local-${Date.now()}`;
+            const newWs = {
+                id: wsId,
+                name: handle.name,
+                type: 'local-fs',
+                color: 'bg-green-600',
+                handle: handle, // Persists to IndexedDB
+                connections: []
+            };
+
+            await db.workspaces.put(newWs);
+            setWorkspaces(prev => [...prev, newWs]);
+            setActiveWorkspace(wsId);
+            setAppState('explorer');
+            toast.success(`Pasta "${handle.name}" aberta!`);
+
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                console.error("Error opening local folder:", error);
+                toast.error("Erro ao abrir pasta.");
+            }
+        }
+    };
+
+
+
+    const lastLoadRef = useRef({
+        folderId: null,
+        providerId: null,
+        timestamp: 0,
+        isLoading: false
+    });
+
+    // 1. Load Files (Triggered by Provider/Path changes)
+    const loadFiles = useCallback(async () => {
+        if (!provider) return;
+
+        const providerId = provider.workspaceId || 'unknown';
+        const now = Date.now();
+
+        // Prevent rapid re-fetching loop (within 500ms) or parallel loads for same scope
+        if (
+            lastLoadRef.current.folderId === currentFolderId &&
+            lastLoadRef.current.providerId === providerId
+        ) {
+            if (lastLoadRef.current.isLoading) {
+                console.log(`[FileSystem] Skipping load - already in progress (Folder: ${currentFolderId})`);
+                return;
+            }
+            if ((now - lastLoadRef.current.timestamp) < 500) {
+                console.log(`[FileSystem] Skipping load - too soon (Folder: ${currentFolderId})`);
+                return;
+            }
+        }
+
+        lastLoadRef.current = {
+            folderId: currentFolderId,
+            providerId: providerId,
+            timestamp: now,
+            isLoading: true
+        };
+
+        console.log(`[FileSystem] Loading files... Folder: ${currentFolderId}, Provider: ${provider.constructor.name}`);
+        // setIsLoading(true); // Don't block UI globally? Or use explicit state?
+        // setAppState('loading-files'); // Optional
+
+        try {
+            let fetchId = currentFolderId;
+            let isConnectionRoot = false;
+
+            // SPECIAL CASE: Connection Root
+            if (activeWorkspaceObj?.connections?.some(c => c.id === currentFolderId)) {
+                fetchId = null; // 'root' for the provider
+                isConnectionRoot = true;
+            }
+
+            const filesData = await provider.list(fetchId);
+            console.log(`[FileSystem] Loaded ${filesData?.length} items.`);
+
+            // Fix: Override parentId if we are at connection root so App.jsx displays them
+            if (isConnectionRoot && Array.isArray(filesData)) {
+                filesData.forEach(f => f.parentId = currentFolderId);
+            }
+
+            setFiles(filesData);
+        } catch (error) {
+            console.error("Erro ao carregar arquivos:", error);
+            if (error.message && error.message.includes("Sessão Expirada")) {
+                toast.error("Sessão expirada. Reconecte na aba Configurações.");
+            } else {
+                toast.error("Erro ao listar arquivos.");
+            }
+        } finally {
+            setIsProcessing(false);
+            lastLoadRef.current.isLoading = false;
+        }
+    }, [currentFolderId, provider, activeWorkspaceObj]);
+
+    // Trigger Load whenever Provider or Folder changes
+    useEffect(() => {
+        loadFiles();
+    }, [loadFiles]);
+
+
     // 2. Create Folder
     const createFolder = useCallback(async (name) => {
         if (!provider) return;
+        setIsProcessing(true);
         try {
             const newFolder = await provider.createFolder(name, currentFolderId);
             setFiles(prev => [...prev, newFolder]);
@@ -167,21 +389,79 @@ export function useFileSystem() {
         } catch (error) {
             console.error("Erro ao criar pasta:", error);
             toast.error("Erro ao criar pasta.");
+        } finally {
+            setIsProcessing(false);
         }
     }, [currentFolderId, provider]);
 
-    // 3. Delete Files
+    // 3. Soft Delete Files (Move to Trash)
     const deleteFiles = useCallback(async (ids) => {
         if (!provider) return;
+        setIsProcessing(true);
+        const timestamp = Date.now();
         try {
-            await provider.delete(ids);
-            setFiles(prev => prev.filter(f => !ids.includes(f.id)));
-            toast.success(`${ids.length} item(s) eliminado(s).`);
+            // Update in DB (soft delete)
+            await Promise.all(ids.map(id => db.files.update(id, { deletedAt: timestamp })));
+
+            // Update local state
+            setFiles(prev => prev.map(f => ids.includes(f.id) ? { ...f, deletedAt: timestamp } : f));
+
+            toast.success(`${ids.length} item(s) movido(s) para a lixeira.`);
         } catch (error) {
-            console.error("Erro ao eliminar ficheiros:", error);
-            toast.error("Erro ao eliminar itens.");
+            console.error("Erro ao mover para lixeira:", error);
+            toast.error("Erro ao excluir itens.");
+        } finally {
+            setIsProcessing(false);
         }
     }, [provider]);
+
+    // 3.1 Restore Files from Trash
+    const restoreFiles = useCallback(async (ids) => {
+        setIsProcessing(true);
+        try {
+            await Promise.all(ids.map(id => db.files.update(id, { deletedAt: null })));
+            setFiles(prev => prev.map(f => ids.includes(f.id) ? { ...f, deletedAt: null } : f));
+            toast.success(`${ids.length} item(s) restaurado(s).`);
+        } catch (error) {
+            console.error("Erro ao restaurar:", error);
+            toast.error("Erro ao restaurar itens.");
+        } finally {
+            setIsProcessing(false);
+        }
+    }, []);
+
+    // 3.2 Permanent Delete (Empty Trash / Specific)
+    const permanentDeleteFiles = useCallback(async (ids) => {
+        if (!provider) return;
+        setIsProcessing(true);
+        try {
+            // Delete from Provider (S3/Drive/FS)
+            // Note: For now, our provider.delete() might need to be robust. 
+            // We assume provider.delete() physically removes files.
+            await provider.delete(ids);
+
+            // Remove from DB
+            await db.files.bulkDelete(ids);
+
+            // Update local state
+            setFiles(prev => prev.filter(f => !ids.includes(f.id)));
+
+            toast.success(`${ids.length} item(s) deletado(s) permanentemente.`);
+        } catch (error) {
+            console.error("Erro ao deletar permanentemente:", error);
+            toast.error("Erro ao deletar itens.");
+        } finally {
+            setIsProcessing(false);
+        }
+    }, [provider]);
+
+    // 3.3 Empty Trash
+    const emptyTrash = useCallback(async () => {
+        const trashItems = files.filter(f => f.workspaceId === activeWorkspace && f.deletedAt);
+        if (trashItems.length === 0) return;
+
+        await permanentDeleteFiles(trashItems.map(f => f.id));
+    }, [files, activeWorkspace, permanentDeleteFiles]);
 
     // 4. Rename File
     const renameFile = useCallback(async (id, newName) => {
@@ -199,62 +479,63 @@ export function useFileSystem() {
     // 5. Add Files (Upload)
     const addFiles = useCallback(async (newFiles) => {
         if (!provider) return;
-        // IDs must be generated by parent or here.
+        setIsProcessing(true);
+
+        // Prepare files
         const preparedFiles = newFiles.map(f => ({
             ...f,
             parentId: f.parentId || currentFolderId,
-            // workspaceId handled by provider or here? Provider knows its workspaceId.
-            // But setFiles needs it if filter relies on it.
             workspaceId: f.workspaceId || activeWorkspace
         }));
 
         try {
+            // Save initial records (Fast)
             const savedFiles = await provider.saveFiles(preparedFiles);
             setFiles(prev => [...prev, ...savedFiles]);
             toast.success(`${newFiles.length} ficheiro(s) adicionado(s).`);
+
+            // Trigger Background Processing
+            savedFiles.forEach(savedFile => {
+                // Find original blob content
+                const original = newFiles.find(nf => nf.name === savedFile.name && nf.size === savedFile.size); // simpler match
+                if (original && original.content instanceof Blob) {
+                    processFileInBackground(savedFile, original.content);
+                } else if (original && original.content instanceof File) {
+                    processFileInBackground(savedFile, original.content);
+                }
+            });
+
         } catch (error) {
             console.error("Erro ao adicionar ficheiros:", error);
             toast.error("Erro ao salvar arquivos.");
+        } finally {
+            setIsProcessing(false);
         }
-    }, [currentFolderId, activeWorkspace, provider]);
+    }, [currentFolderId, activeWorkspace, provider, processFileInBackground]);
 
     // 6. Import Dropped Files (Recursive Folder Support)
     const importDroppedFiles = useCallback(async (items) => {
         const loadingToast = toast.loading("Processando arquivos...");
+        setIsProcessing(true);
         const folderCache = {};
         const newFiles = [];
         const newFolders = [];
+        const filesToProcess = []; // Store { record, blob }
 
         const ensureFolder = async (path, rootParentId) => {
             if (!path || path === '.') return rootParentId;
             if (folderCache[path]) return folderCache[path];
-
             const parts = path.split('/');
             let currentParent = rootParentId;
             let currentPath = '';
-
             for (const part of parts) {
                 currentPath = currentPath ? `${currentPath}/${part}` : part;
-                if (folderCache[currentPath]) {
-                    currentParent = folderCache[currentPath];
-                    continue;
-                }
-
+                if (folderCache[currentPath]) { currentParent = folderCache[currentPath]; continue; }
                 const existing = files.find(f => f.parentId === currentParent && f.name === part && f.type === 'folder');
-                if (existing) {
-                    currentParent = existing.id;
-                    folderCache[currentPath] = existing.id;
-                } else {
+                if (existing) { currentParent = existing.id; folderCache[currentPath] = existing.id; }
+                else {
                     const folderId = `folder-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                    const folder = {
-                        id: folderId,
-                        parentId: currentParent,
-                        workspaceId: activeWorkspace,
-                        name: part,
-                        type: 'folder',
-                        size: '--',
-                        date: 'Hoje'
-                    };
+                    const folder = { id: folderId, parentId: currentParent, workspaceId: activeWorkspace, name: part, type: 'folder', size: '--', date: new Date().toLocaleDateString() };
                     newFolders.push(folder);
                     folderCache[currentPath] = folderId;
                     currentParent = folderId;
@@ -271,7 +552,7 @@ export function useFileSystem() {
 
                 let specificParentId = currentFolderId;
                 if (folderPath) {
-                    specificParentId = await ensureFolder(folderPath, currentFolderId);
+                    specificParentId = await ensureFolder(folderPath, currentFolderId); // eslint-disable-line
                 }
 
                 let content = item.file;
@@ -287,7 +568,8 @@ export function useFileSystem() {
                         item.file.name.endsWith('.html') ||
                         item.file.name.endsWith('.css') ||
                         item.file.name.endsWith('.js') ||
-                        item.file.name.endsWith('.jsx')
+                        item.file.name.endsWith('.jsx') ||
+                        item.file.name.endsWith('.json')
                     ) {
                         content = await new Promise(r => {
                             const reader = new FileReader();
@@ -300,16 +582,19 @@ export function useFileSystem() {
                     // Preview component will handle URL.createObjectURL(blob).
                 }
 
-                newFiles.push({
+                const newFileRecord = {
                     id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                     parentId: specificParentId,
                     workspaceId: activeWorkspace,
                     name: fileName,
                     type: item.file.type.startsWith('image/') ? 'image' : item.file.type.includes('pdf') ? 'pdf' : 'file',
                     size: item.file.size > 1024 * 1024 ? (item.file.size / 1024 / 1024).toFixed(2) + ' MB' : (item.file.size / 1024).toFixed(2) + ' KB',
-                    date: 'Hoje',
+                    sizeRaw: item.file.size,
+                    date: new Date().toLocaleDateString(),
                     content: content
-                });
+                };
+                newFiles.push(newFileRecord);
+                filesToProcess.push({ record: newFileRecord, blob: item.file });
             }
 
             if (newFolders.length > 0) {
@@ -323,12 +608,19 @@ export function useFileSystem() {
             toast.dismiss(loadingToast);
             toast.success(`${newFiles.length} arquivos importados!`);
 
+            // Trigger Background Processing
+            filesToProcess.forEach(({ record, blob }) => {
+                processFileInBackground(record, blob);
+            });
+
         } catch (error) {
             console.error("Import failed:", error);
             toast.dismiss(loadingToast);
             toast.error("Falha na importação.");
+        } finally {
+            setIsProcessing(false);
         }
-    }, [currentFolderId, activeWorkspace, files]);
+    }, [currentFolderId, activeWorkspace, files, provider, processFileInBackground]);
 
     // 7. Download File
     const downloadFile = useCallback((file) => {
@@ -340,8 +632,8 @@ export function useFileSystem() {
         } else if (typeof file.content === 'string') {
             // If content is string, create blob (mostly for legacy text files or code)
             blob = new Blob([file.content], { type: 'text/plain' });
-            // If it was a DataURL (legacy images), we might need to convert differently, 
-            // but going forward we use Blobs. 
+            // If it was a DataURL (legacy images), we might need to convert differently,
+            // but going forward we use Blobs.
             // For now, let's assume text if string, unless it starts with data:
             if (file.content.startsWith('data:')) {
                 // Fetch data url to blob
@@ -391,11 +683,275 @@ export function useFileSystem() {
     const resetSystem = async () => {
         try {
             await db.delete();
+            localStorage.clear(); // Clear all prefs
             window.location.reload();
         } catch (error) {
             console.error("Erro ao resetar sistema:", error);
         }
     };
+
+    // --- CLIPBOARD ACTIONS ---
+    const pasteFiles = useCallback(async (items, action) => {
+        if (!provider) return;
+        if (!items || items.length === 0) return;
+
+        const loadingToast = toast.loading(action === 'cut' ? "Movendo arquivos..." : "Copiando arquivos...");
+        const newFiles = [];
+
+        try {
+            for (const item of items) {
+                // Prepare new item
+                let newItem = { ...item };
+                newItem.id = `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                newItem.parentId = currentFolderId;
+                newItem.workspaceId = activeWorkspace;
+                newItem.date = new Date().toLocaleDateString(); // Update date
+
+                // Handle Name Collision
+                const existingName = files.find(f => f.parentId === currentFolderId && f.name === item.name);
+                if (existingName) {
+                    const nameParts = item.name.lastIndexOf('.') > 0
+                        ? [item.name.substring(0, item.name.lastIndexOf('.')), item.name.substring(item.name.lastIndexOf('.'))]
+                        : [item.name, ''];
+                    newItem.name = `${nameParts[0]} (Cópia)${nameParts[1]}`;
+                }
+
+                // If Cut, we effectively want to move. 
+                // However, providers might have efficient 'move' or we just 'copy & delete'.
+                // For simplicity and safety across providers (S3/Drive), we'll treat as copy for now, 
+                // then delete original if 'cut' success.
+                // UNLESS it's the SAME workspace/provider, where we can just update parentId.
+
+                // For now, let's treat everything as "Copy to new location".
+                // TODO: Optimize 'Cut' within same provider to just update metadata.
+
+                newFiles.push(newItem);
+            }
+
+            // Save new files
+            const saved = await provider.saveFiles(newFiles);
+            setFiles(prev => [...prev, ...saved]);
+
+            // If Cut, delete originals
+            if (action === 'cut') {
+                await deleteFiles(items.map(i => i.id));
+            }
+
+            toast.dismiss(loadingToast);
+            toast.success(action === 'cut' ? "Arquivos movidos!" : "Arquivos copiados!");
+        } catch (error) {
+            console.error("Paste failed:", error);
+            toast.dismiss(loadingToast);
+            toast.error("Erro ao colar arquivos.");
+        }
+    }, [provider, currentFolderId, activeWorkspace, files, deleteFiles]);
+
+    // --- SEARCH & ROUTING ---
+    // Hash is now updated directly inside navigate/navigateBack/navigateForward/navigateToPath.
+    // No separate useEffect needed (which was causing infinite loops).
+
+
+    // Hash Routing Listener (Source of Truth for "Back" button and Initial Load)
+    useEffect(() => {
+        const handleHashChange = async () => {
+            const hash = window.location.hash; // #/ws/WSID/folder/FOLDERID
+            if (!hash) return;
+
+            if (hash.startsWith('#/ws/')) {
+                const parts = hash.split('/');
+                const wsId = parts[2];
+                let folderId = parts[4];
+                if (folderId === 'root') folderId = 'root'; // Keep explicit 'root' string for logic, or null? 
+                // Let's standarize: Internal state uses null for root. URL uses 'root'.
+                const targetFolderId = folderId === 'root' ? null : folderId;
+
+                // 1. Switch Workspace if needed
+                if (wsId && wsId !== activeWorkspace) {
+                    setActiveWorkspace(wsId);
+                    // Note: Changing activeWorkspace might trigger other effects. 
+                    // ideally we should wait for that, but state updates are batched.
+                }
+
+                // 2. Resolve Path (Reconstruction)
+                if (targetFolderId) {
+                    // Handle Virtual Folders
+                    if (targetFolderId === 'favorites') {
+                        setCurrentPath([{ id: 'favorites', name: 'Favoritos' }]);
+                        // History logic should be consistent?
+                        return;
+                    }
+                    if (targetFolderId === 'recent') {
+                        setCurrentPath([{ id: 'recent', name: 'Recentes' }]);
+                        return;
+                    }
+                    if (targetFolderId === 'trash') {
+                        setCurrentPath([{ id: 'trash', name: 'Lixeira' }]);
+                        return;
+                    }
+                    if (targetFolderId.startsWith('tag-')) {
+                        // We might need to fetch tag name?
+                        // For now just show ID or generic.
+                        setCurrentPath([{ id: targetFolderId, name: 'Tag' }]);
+                        return;
+                    }
+
+                    // Handle Real Folders
+                    if (files.length === 0) {
+                        // Could be initial load. 
+                        return;
+                    }
+
+                    // Check for Connections/Drives
+                    const workspace = workspaces.find(w => w.id === wsId);
+                    const connection = workspace?.connections?.find(c => c.id === targetFolderId);
+
+                    if (connection) {
+                        setCurrentPath([{ id: connection.id, name: connection.name }]);
+                        return;
+                    }
+
+                    const targetFolder = files.find(f => f.id === targetFolderId && f.type === 'folder');
+
+                    if (!targetFolder) {
+                        // 404 - Folder not found
+                        console.warn(`Folder ${targetFolderId} not found.`);
+                        // toast.error("Pasta não encontrada. Redirecionando para raiz.");
+                        // Redirect to root of workspace
+                        // window.location.hash = `#/ws/${wsId}/folder/root`;
+
+                        // FIX: Don't redirect immediately if we are just loading?
+                        // But we checked files.length === 0 above.
+                        // If files are loaded and folder is not found, then it's a real 404.
+                        // Let's keep redirect but maybe less aggressive toast?
+                        window.location.hash = `#/ws/${wsId}/folder/root`;
+                        return;
+                    }
+
+                    // Build Breadcrumbs (Traverse Up)
+                    const newPath = [];
+                    let current = targetFolder;
+                    while (current) {
+                        newPath.unshift({ id: current.id, name: current.name });
+                        if (!current.parentId) break; // Should not happen for subfolders if root is null
+                        const parent = files.find(f => f.id === current.parentId);
+                        current = parent;
+                    }
+
+                    setCurrentPath(newPath);
+                    // Update history internal state to match?
+                    // We shouldn't PUSH to internal history if we just handled a browser action?
+                    // Or maybe we treat it as a "jump".
+                    // For simply syncing state on reload/back/forward:
+                    // We don't necessarily update history stack here, 
+                    // unless we want to allow "Back" within the app to work.
+                    // But if we use browser back, app history might get out of sync.
+                    // That's a larger issue. For now, let's just ensure CurrentPath is correct.
+
+                } else {
+                    // Root
+                    setCurrentPath([]);
+                }
+            }
+        };
+
+        // Call on mount to handle initial URL
+        if (files.length > 0) {
+            handleHashChange();
+        }
+
+        window.addEventListener('hashchange', handleHashChange);
+        return () => window.removeEventListener('hashchange', handleHashChange);
+    }, [activeWorkspace, files]); // Added files dependency to re-run when files load
+
+
+    // Update Hash during programmatic Navigation
+    // We modify the 'navigate' functions to update Hash, 
+    // AND we remove the useEffect that auto-updates hash from state (to avoid loops).
+    // ... See next edit for 'navigate' function updates.
+
+
+
+    // 8. Toggle Star (Favorites)
+    const toggleStar = useCallback(async (filesToToggle) => {
+        if (!provider) return;
+        const items = Array.isArray(filesToToggle) ? filesToToggle : [filesToToggle];
+        const updates = items.map(f => ({
+            key: f.id,
+            changes: { isStarred: !f.isStarred }
+        }));
+
+        try {
+            // Bulk update in DB
+            await Promise.all(updates.map(u => db.files.update(u.key, u.changes)));
+
+            // Update local state
+            setFiles(prev => prev.map(f => {
+                const update = updates.find(u => u.key === f.id);
+                return update ? { ...f, ...update.changes } : f;
+            }));
+
+            const action = items[0].isStarred ? "removido dos favoritos" : "adicionado aos favoritos";
+            toast.success(`${items.length > 1 ? 'Itens atualizaram' : 'Item ' + action}`);
+        } catch (error) {
+            console.error("Erro ao favoritar:", error);
+            toast.error("Erro ao atualizar favoritos.");
+        }
+    }, [provider]);
+
+    const downloadFiles = useCallback(async (fileIds) => {
+        if (!fileIds || fileIds.length === 0) return;
+
+        const toastId = toast.loading(`Preparando download de ${fileIds.length} arquivos...`);
+        setIsProcessing(true);
+
+        try {
+            const zip = new JSZip();
+            const folder = zip.folder("files");
+
+            let successCount = 0;
+            let failCount = 0;
+
+            for (const id of fileIds) {
+                const file = files.find(f => f.id === id);
+                if (!file) continue;
+
+                if (file.type === 'folder') {
+                    continue;
+                }
+
+                try {
+                    const fileRecord = await db.files.get(id);
+                    if (fileRecord && fileRecord.content) {
+                        folder.file(fileRecord.name, fileRecord.content);
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+
+                } catch (err) {
+                    console.error(`Erro ao adicionar ${file.name} ao ZIP:`, err);
+                    failCount++;
+                }
+            }
+
+            if (successCount === 0) {
+                toast.error("Nenhum arquivo pôde ser baixado.", { id: toastId });
+                return;
+            }
+
+            const content = await zip.generateAsync({ type: "blob" });
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            saveAs(content, `omnifiles-download-${timestamp}.zip`);
+
+            toast.success(`${successCount} arquivos baixados.`, { id: toastId });
+
+        } catch (error) {
+            console.error("Erro ao gerar ZIP:", error);
+            toast.error("Erro ao gerar arquivo ZIP.", { id: toastId });
+        } finally {
+            setIsProcessing(false);
+        }
+    }, [files]);
 
     return {
         appState, setAppState,
@@ -404,8 +960,13 @@ export function useFileSystem() {
         currentPath, historyIndex, history,
         previewFile, setPreviewFile,
         currentFolderId,
-        navigate, navigateBreadcrumb, navigateBack, navigateForward, navigateToPath,
-        switchWorkspace, createWorkspace, updateWorkspaceData, resetSystem,
-        createFolder, deleteFiles, renameFile, addFiles, importDroppedFiles, downloadFile
+        navigate, navigateBreadcrumb, navigateBack, navigateForward, navigateToPath, navigateUp,
+        switchWorkspace, createWorkspace, openLocalFolder, updateWorkspaceData, resetSystem,
+        createFolder, deleteFiles, renameFile, addFiles, importDroppedFiles, downloadFile,
+        pasteFiles, // Exporting paste function
+        isProcessing, // Exporting loading state
+        toggleStar, // Exporting favorites action
+        restoreFiles, permanentDeleteFiles, emptyTrash, downloadFiles, // Exporting downloadFiles
+        loadSystem // Exporting loadSystem for manual refresh
     };
 }
