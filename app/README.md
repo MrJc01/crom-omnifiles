@@ -1,94 +1,77 @@
-# OmniFiles 🚀
+# OmniFiles App 🚀
 
-**OmniFiles** é um gerenciador de arquivos web moderno, rápido e seguro, construído com React e Vite. Ele oferece uma experiência de desktop no navegador, permitindo gerenciar arquivos locais e na nuvem (Google Drive, S3) em uma interface unificada.
+Código-fonte da aplicação web OmniFiles — gerenciador de arquivos multi-provider.
 
-![Preview](https://via.placeholder.com/800x450?text=OmniFiles+Preview)
-
-## ✨ Funcionalidades Principais
-
--   **Gerenciamento Unificado**: Acesse arquivos locais (File System Access API), Google Drive e S3 no mesmo lugar.
--   **Performance Extrema**: Virtualização de listas para suportar milhares de arquivos sem travamentos.
--   **Segurança**: Sanitização de HTML/Markdown e arquitetura segura de tokens.
--   **Offline-First**: Funciona offline com persistência via IndexedDB (Dexie.js).
--   **Interface Rica**:
-    -   Modos de visualização Grade e Lista.
-    -   Drag & Drop para upload e organização.
-    -   Menus de contexto nativos.
-    -   Temas Dark/Slate modernos.
--   **Internacionalização**: Suporte nativo a Português (BR) e Inglês.
-
-## 🛠️ Tecnologias
-
--   **Frontend**: React 18, Vite 5.
--   **Estilização**: Tailwind CSS 3.
--   **Estado & Dados**: IndexedDB (Dexie.js), React Context.
--   **Testes**: Vitest, React Testing Library.
--   **Ícones**: Lucide React.
-
-## 🚀 Como Rodar o Projeto
-
-### Pré-requisitos
--   Node.js 18+
--   npm ou pnpm
-
-### Instalação
+## Início Rápido
 
 ```bash
-# Clone o repositório
-git clone https://github.com/seu-usuario/omni-files.git
-
-# Entre na pasta
-cd omni-files/app
-
-# Instale as dependências
 npm install
+cp .env.example .env   # Configure VITE_GOOGLE_CLIENT_ID
+npm run dev             # http://localhost:5173
 ```
 
-### Desenvolvimento
+## Scripts
 
-```bash
-# Iniciar servidor de desenvolvimento
-npm run dev
+| Comando | Descrição |
+|---------|-----------|
+| `npm run dev` | Servidor de desenvolvimento |
+| `npm run build` | Build de produção |
+| `npm run preview` | Preview do build |
+| `npm test` | Testes unitários (watch) |
+| `npm run test:run` | Testes unitários (CI) |
+| `npm run lint` | ESLint |
+
+## Variáveis de Ambiente
+
+| Variável | Descrição | Obrigatório |
+|----------|-----------|:-----------:|
+| `VITE_GOOGLE_CLIENT_ID` | Client ID do Google OAuth 2.0 | Para Google Drive |
+| `VITE_ENABLE_DEBUG` | Ativa logs de debug | Não |
+
+## Providers Suportados
+
+| Provider | Status | Descrição |
+|----------|:------:|-----------|
+| IndexedDB (Navegador) | ✅ | Armazenamento local no browser |
+| File System Access API | ✅ | Acesso a pastas do PC |
+| Google Drive | ✅ | CRUD completo via OAuth |
+| Dropbox | 🔜 | Em breve |
+| AWS S3 | 🔜 | Em breve |
+
+## Funcionalidades Implementadas
+
+- ✅ Grid View + List View (virtualizados com react-window)
+- ✅ Upload de arquivos e pastas (recursivo)
+- ✅ Download individual e em lote (ZIP)
+- ✅ Copiar/Mover entre providers
+- ✅ Preview de arquivos (texto, markdown, imagem, PDF, vídeo, áudio)
+- ✅ Sistema de Tags com cores
+- ✅ Seleção avançada (Ctrl, Shift, Drag, Long Press, Checkboxes)
+- ✅ Lixeira, Favoritos, Recentes
+- ✅ Menu de contexto completo
+- ✅ Atalhos de teclado
+- ✅ Internacionalização (PT-BR / EN)
+- ✅ Tema dark moderno
+
+## Estrutura
+
 ```
-O app estará disponível em `http://localhost:5173`.
-
-### Build de Produção
-
-```bash
-# Gerar build otimizado
-npm run build
-
-# Visualizar build localmente
-npm run preview
+src/
+├── App.jsx              # Estado principal
+├── providers/           # Abstração de armazenamento
+├── hooks/               # Custom hooks
+├── context/             # React contexts
+├── components/
+│   ├── core/            # FileGrid, Preview, ContextMenu, Tags
+│   ├── layout/          # Header, Sidebar, DetailsPanel
+│   ├── modals/          # MoveCopyModal
+│   └── settings/        # Settings, AddService, Welcome
+├── locales/             # pt-br.json, en.json
+└── db/                  # Schema Dexie.js
 ```
-
-## 🧪 Testes
-
-```bash
-# Rodar testes unitários
-npm test
-
-# Rodar testes com interface gráfica
-npm test -- --ui
-```
-
-## 🐳 Docker
-
-Para rodar via Docker:
-
-```bash
-# Build da imagem
-docker build -t omnifiles .
-
-# Rodar container
-docker run -p 8080:80 omnifiles
-```
-Acesse em `http://localhost:8080`.
-
-## 🤝 Contribuição
-
-Contribuições são bem-vindas! Consulte o arquivo [CONTRIBUTING.md](CONTRIBUTING.md) para diretrizes de desenvolvimento.
 
 ## 📄 Licença
 
-Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+Este projeto é desenvolvido por **Juan Cândido** ([Crom.Run](https://github.com/MrJc01)). O código é aberto para estudo e uso pessoal. A revenda ou exploração comercial deste software sem autorização é proibida. Para uso comercial, entre em contato: **mrj.crom@gmail.com**.
+
+Consulte o arquivo [LICENSE](../LICENSE) para mais detalhes.

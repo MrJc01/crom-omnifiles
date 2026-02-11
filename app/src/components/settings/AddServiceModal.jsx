@@ -75,9 +75,24 @@ export const AddServiceModal = ({ onClose, onAdd }) => {
                     {step === 1 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             {SERVICE_CATALOG.map(service => (
-                                <button key={service.id} onClick={() => handleSelect(service)} className="flex flex-col items-start p-4 rounded-xl border border-slate-700 bg-slate-800/30 hover:bg-slate-800 hover:border-blue-500/50 transition-all text-left group">
+                                <button
+                                    key={service.id}
+                                    onClick={() => !service.comingSoon && handleSelect(service)}
+                                    disabled={service.comingSoon}
+                                    className={`flex flex-col items-start p-4 rounded-xl border transition-all text-left group relative
+                                        ${service.comingSoon
+                                            ? 'border-slate-800 bg-slate-900/30 opacity-50 cursor-not-allowed'
+                                            : 'border-slate-700 bg-slate-800/30 hover:bg-slate-800 hover:border-blue-500/50 cursor-pointer'
+                                        }
+                                    `}
+                                >
+                                    {service.comingSoon && (
+                                        <span className="absolute top-2 right-2 text-[10px] font-bold uppercase tracking-wider bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">
+                                            Em breve
+                                        </span>
+                                    )}
                                     <div className={`p-2 rounded-lg bg-slate-900 mb-3 ${service.color}`}><service.icon size={24} /></div>
-                                    <div className="font-semibold text-slate-200 group-hover:text-blue-400 transition-colors">{service.name}</div>
+                                    <div className={`font-semibold transition-colors ${service.comingSoon ? 'text-slate-500' : 'text-slate-200 group-hover:text-blue-400'}`}>{service.name}</div>
                                     <div className="text-xs text-slate-500 mt-1">{service.desc}</div>
                                 </button>
                             ))}
