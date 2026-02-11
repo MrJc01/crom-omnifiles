@@ -98,7 +98,26 @@ export const FilePreviewModal = ({ file, onClose }) => {
                         </div>
                     ) : (file.type === 'pdf' || file.name.endsWith('.pdf')) ? (
                         <div className="w-full h-full p-4">
-                            <iframe src={contentUrl || URL.createObjectURL(file.content)} className="w-full h-full rounded-xl border border-slate-700 bg-white" title={file.name}></iframe>
+                            {contentUrl ? (
+                                <iframe src={contentUrl} className="w-full h-full rounded-xl border border-slate-700 bg-white" title={file.name}></iframe>
+                            ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                    <div className="bg-slate-800/50 p-8 rounded-2xl border border-slate-700 inline-flex flex-col items-center text-center">
+                                        <FileText size={64} className="text-slate-600 mb-4" />
+                                        <h3 className="text-xl font-medium text-slate-200 mb-2">Carregando visualização...</h3>
+                                        <p className="text-slate-400 mb-6 max-w-md">
+                                            Se a visualização não carregar, faça o download do arquivo.
+                                        </p>
+                                        <button
+                                            onClick={handleDownload}
+                                            className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
+                                        >
+                                            <Download size={20} />
+                                            Baixar PDF
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     ) : isLargeFile ? (
                         <div className="text-center p-8">

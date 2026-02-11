@@ -2,9 +2,10 @@ import { FileSystemProvider } from './FileSystemProvider';
 import { GOOGLE_CONFIG } from '../config/google';
 
 export class GoogleDriveProvider extends FileSystemProvider {
-    constructor(workspaceId, token) {
+    constructor(workspaceId, token, connectionId) {
         super(workspaceId);
         this.token = token; // OAuth Access Token
+        this.connectionId = connectionId;
     }
 
     async list(parentId) {
@@ -40,7 +41,7 @@ export class GoogleDriveProvider extends FileSystemProvider {
 
         return data.files.map(f => ({
             id: f.id,
-            parentId: parentId || 'root',
+            parentId: (parentId === 'root' || parentId === this.connectionId || !parentId) ? this.connectionId : parentId,
             workspaceId: this.workspaceId,
             name: f.name,
             type: this.mapMimeType(f.mimeType),
@@ -53,48 +54,75 @@ export class GoogleDriveProvider extends FileSystemProvider {
     }
 
     async get(fileId) {
-        // For text files, we can read content.
-        // For binaries, we might need alt=media
-        // For Google Docs, we need export links.
-
-        // This is a simplified "get metadata" or "get content"? 
-        // Provider interface usually implies getting the object, but 'getContent' is separate.
-        // Let's implement standard get object.
         const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?fields=id,name,mimeType,size,modifiedTime`, {
             headers: { 'Authorization': `Bearer ${this.token}` }
         });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            console.error(`[Drive] get() Error: ${response.status}`, errorBody);
+            throw new Error(`Drive API Error: ${response.status}`);
+        }
+
         return await response.json();
     }
 
-    async getContent(id) {
+    async debugDownload(id) {
+        console.log(`[Drive] debugDownload(${id}) called`);
         // Determine file type first to know if we download or export
-        const meta = await this.get(id);
+        let meta;
+        try {
+            meta = await this.get(id);
+            console.log(`[Drive] Metadata parsed:`, meta);
+        } catch (e) {
+            console.error('[Drive] getContent: metadata fetch failed', e);
+            return null;
+        }
+
+        if (!meta || !meta.mimeType) {
+            console.error('[Drive] getContent: invalid metadata', meta);
+            return null;
+        }
 
         // Google Docs must be exported
         if (meta.mimeType.startsWith('application/vnd.google-apps.')) {
-            // Export as PDF for preview? Or plain text?
-            // For simplicity/safety: PDF or PDF Link. 
-            // But app expects content to be displayed.
-            // Maybe export as 'text/plain' for Docs?
+            console.log(`[Drive] Exporting Google Doc: ${meta.mimeType}`);
             if (meta.mimeType.includes('document')) {
                 const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}/export?mimeType=text/plain`, {
                     headers: { 'Authorization': `Bearer ${this.token}` }
                 });
+                console.log(`[Drive] Export status: ${res.status}`);
+                if (!res.ok) {
+                    console.error(`[Drive] Export failed: ${res.status}`);
+                    return null;
+                }
                 return await res.text();
             }
+            console.warn(`[Drive] Unsupported Google Doc type: ${meta.mimeType}`);
             return "Visualização não disponível para arquivos nativos do Google (planilhas/slides).";
         }
 
         // Normal files: alt=media
+        console.log(`[Drive] Downloading normal file (alt=media)...`);
         const response = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`, {
             headers: { 'Authorization': `Bearer ${this.token}` }
         });
 
+        console.log(`[Drive] Download status: ${response.status}`);
+        if (!response.ok) {
+            console.error(`[Drive] Download failed: ${response.status}`);
+            return null;
+        }
+
         if (meta.mimeType.startsWith('text/') || meta.name.endsWith('.js') || meta.name.endsWith('.json') || meta.name.endsWith('.md')) {
+            console.log(`[Drive] Reading as text...`);
             return await response.text();
         }
 
-        return await response.blob();
+        console.log(`[Drive] Reading as blob...`);
+        const blob = await response.blob();
+        console.log(`[Drive] Blob received:`, blob);
+        return blob;
     }
 
     mapMimeType(mime) {
@@ -118,7 +146,7 @@ export class GoogleDriveProvider extends FileSystemProvider {
     // Implement createFolder, saveFiles, delete, rename similarly...
     async createFolder(name, parentId) {
         // Fix: If parentId is a connection ID (local app concept), map to 'root' for Drive
-        const actualParent = (parentId && parentId.startsWith('conn-')) ? 'root' : (parentId || 'root');
+        const actualParent = (parentId && (parentId.startsWith('conn-') || parentId === this.connectionId)) ? 'root' : (parentId || 'root');
 
         const metadata = {
             name: name,

@@ -26,20 +26,23 @@ export function useFileSystemInternal() {
 
     const provider = useMemo(() => {
         // 1. Check if we are inside a Connection (Drive/S3) based on Path Root
+        console.log("[FileSystem] Computing provider. CurrentPath:", currentPath);
         if (currentPath.length > 0 && activeWorkspaceObj?.connections) {
             const rootId = currentPath[0].id;
             const activeConnection = activeWorkspaceObj.connections.find(c => c.id === rootId);
+            console.log("[FileSystem] RootID:", rootId, "Connection:", activeConnection);
 
             if (activeConnection) {
                 console.log(`[FileSystem] Switching to Provider: ${activeConnection.name} (${activeConnection.serviceId})`);
                 if (activeConnection.serviceId === 'google-drive') {
                     // Pass activeWorkspace ID so files are filtered correctly in App.jsx
-                    return new GoogleDriveProvider(activeWorkspace, activeConnection.token);
+                    return new GoogleDriveProvider(activeWorkspace, activeConnection.token, activeConnection.id);
                 }
                 // Add other providers here
             }
         }
         // 2. Fallback to Workspace Default Provider
+        console.log("[FileSystem] Using Default Provider (IndexedDB)");
         return getProvider(activeWorkspaceObj);
     }, [activeWorkspaceObj, currentPath, activeWorkspace]);
 
@@ -157,28 +160,43 @@ export function useFileSystemInternal() {
             }
 
             // Fetch content from provider if missing
-            if (provider && typeof provider.getContent === 'function') {
-                console.log("[FileSystem] Fetching content via provider...");
-                const loadingToast = toast.loading(`Baixando ${item.name}...`);
-                try {
-                    const content = await provider.getContent(item.id);
-                    console.log("[FileSystem] Content fetched:", content);
-                    const updatedFile = { ...item, content };
+            if (provider) {
+                console.log("[FileSystem] Provider instance:", provider);
+                console.log("[FileSystem] Provider methods:", Object.getOwnPropertyNames(Object.getPrototypeOf(provider)));
 
-                    // Update state to cache content
-                    setFiles(prev => prev.map(f => f.id === item.id ? updatedFile : f));
+                if (typeof provider.debugDownload === 'function' || typeof provider.getContent === 'function') {
+                    console.log("[FileSystem] Fetching content via provider...");
+                    const loadingToast = toast.loading(`Baixando ${item.name}...`);
+                    try {
+                        const content = typeof provider.debugDownload === 'function'
+                            ? await provider.debugDownload(item.id)
+                            : await provider.getContent(item.id);
+                        console.log("[FileSystem] Content fetched:", content);
 
-                    setPreviewFile(updatedFile);
-                    toast.dismiss(loadingToast);
-                } catch (error) {
-                    console.error("Error fetching file content:", error);
-                    toast.dismiss(loadingToast);
-                    toast.error(`Erro ao abrir arquivo: ${error.message}`);
+                        if (content === null || content === undefined) {
+                            toast.dismiss(loadingToast);
+                            toast.error("Não foi possível baixar o arquivo. Tente novamente.");
+                            return;
+                        }
+
+                        const updatedFile = { ...item, content };
+
+                        // Update state to cache content
+                        setFiles(prev => prev.map(f => f.id === item.id ? updatedFile : f));
+
+                        setPreviewFile(updatedFile);
+                        toast.dismiss(loadingToast);
+                    } catch (error) {
+                        console.error("Error fetching file content:", error);
+                        toast.dismiss(loadingToast);
+                        toast.error(`Erro ao abrir arquivo: ${error.message}`);
+                    }
+                } else {
+                    console.log("[FileSystem] No provider getContent, opening as is.");
+                    // No provider or no getContent method - try opening anyway (might be empty)
+                    setPreviewFile(item);
                 }
-            } else {
-                console.log("[FileSystem] No provider getContent, opening as is.");
-                // No provider or no getContent method - try opening anyway (might be empty)
-                setPreviewFile(item);
+                return;
             }
             return;
         }
@@ -1051,6 +1069,13 @@ export function useFileSystemInternal() {
                         newPath.unshift({ id: current.id, name: current.name });
 
                         if (!current.parentId) break;
+
+                        // Check if parentId is a connection
+                        const parentConnection = workspace?.connections?.find(c => c.id === current.parentId);
+                        if (parentConnection) {
+                            newPath.unshift({ id: parentConnection.id, name: parentConnection.name });
+                            break; // We reached the root (connection)
+                        }
 
                         // Try to find parent in files or DB
                         let parent = files.find(f => f.id === current.parentId);
