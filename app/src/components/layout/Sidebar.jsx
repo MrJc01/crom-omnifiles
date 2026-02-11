@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Plus, Home, Clock, FolderOpen, Star, Tag, Trash2 } from 'lucide-react';
+import { Settings, Plus, Home, Clock, FolderOpen, Star, Tag, Trash2, Github, ExternalLink } from 'lucide-react';
 import { SERVICE_CATALOG } from '../../constants/services';
 import { useTranslation } from 'react-i18next';
 import PropTypes from 'prop-types';
@@ -118,6 +118,28 @@ export const Sidebar = ({
                             ))}
                         </div>
                     </div>
+                </div>
+
+                {/* Footer Links */}
+                <div className="p-3 border-t border-slate-800 space-y-1.5">
+                    <a
+                        href="https://crom.run/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-colors group"
+                    >
+                        <ExternalLink size={15} className="text-blue-400 group-hover:text-blue-300" />
+                        <span>Crom.Run</span>
+                    </a>
+                    <a
+                        href="https://github.com/MrJc01/crom-omnifiles"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800 transition-colors group"
+                    >
+                        <Github size={15} className="text-slate-400 group-hover:text-white" />
+                        <span>GitHub</span>
+                    </a>
                 </div>
             </div>
         </aside>
