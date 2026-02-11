@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify';
 export const FilePreviewModal = ({ file, onClose }) => {
     const [contentUrl, setContentUrl] = useState(null);
     const [isLargeFile, setIsLargeFile] = useState(false);
+    const [textContent, setTextContent] = useState('');
 
     useEffect(() => {
         if (!file) return;
@@ -12,6 +13,7 @@ export const FilePreviewModal = ({ file, onClose }) => {
         // Reset state
         setContentUrl(null);
         setIsLargeFile(false);
+        setTextContent('');
 
         if (file.content instanceof Blob || file.content instanceof File) {
             if (file.type === 'image' || file.type === 'pdf' || file.name.endsWith('.pdf')) {
@@ -19,17 +21,22 @@ export const FilePreviewModal = ({ file, onClose }) => {
                 setContentUrl(url);
                 return () => URL.revokeObjectURL(url);
             } else {
-                // For non-images that are Blobs (large text, binary)
-                // We don't auto-render them to avoid memory issues or hanging
-                setIsLargeFile(true);
+                // Try to read as text if small (< 2MB)
+                if (file.size < 2 * 1024 * 1024) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => setTextContent(e.target.result);
+                    reader.onerror = () => setIsLargeFile(true);
+                    reader.readAsText(file.content);
+                } else {
+                    setIsLargeFile(true);
+                }
             }
         } else if (typeof file.content === 'string') {
-            // Legacy or small text files
-            // If legacy dataURI image
             if (file.content.startsWith('data:image')) {
                 setContentUrl(file.content);
+            } else {
+                setTextContent(file.content);
             }
-            // Else it's text, rendered directly
         }
     }, [file]);
 
@@ -140,11 +147,11 @@ export const FilePreviewModal = ({ file, onClose }) => {
                     ) : file.name.endsWith('.html') ? (
                         <div
                             className="w-full h-full overflow-auto p-4 custom-scrollbar bg-white text-black"
-                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(file.content) }}
+                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(textContent || file.content) }}
                         />
                     ) : (
                         <div className="w-full h-full overflow-auto p-4 custom-scrollbar bg-slate-900">
-                            <pre className="text-slate-300 text-sm font-mono whitespace-pre-wrap break-words">{file.content || "Conteúdo vazio"}</pre>
+                            <pre className="text-slate-300 text-sm font-mono whitespace-pre-wrap break-words">{textContent || "Carregando conteúdo..."}</pre>
                         </div>
                     )}
                 </div>

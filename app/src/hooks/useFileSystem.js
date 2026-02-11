@@ -1070,6 +1070,15 @@ export function useFileSystemInternal() {
 
                         if (!current.parentId) break;
 
+                        // Legacy/Stale Data Fix: Handle 'root' parent from old DB cache
+                        if (current.parentId === 'root') {
+                            const driveConn = workspace?.connections?.find(c => c.serviceId === 'google-drive');
+                            if (driveConn) {
+                                newPath.unshift({ id: driveConn.id, name: driveConn.name });
+                                break;
+                            }
+                        }
+
                         // Check if parentId is a connection
                         const parentConnection = workspace?.connections?.find(c => c.id === current.parentId);
                         if (parentConnection) {
