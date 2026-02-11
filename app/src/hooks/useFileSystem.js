@@ -452,31 +452,100 @@ export function useFileSystemInternal() {
         }
     }, [currentFolderId, provider]);
 
-    // 3. Soft Delete Files (Move to Trash)
+    // 3. Soft Delete Files (Move to Local Trash)
     const deleteFiles = useCallback(async (ids) => {
         if (!provider) return;
         setIsProcessing(true);
         const timestamp = Date.now();
+        const toastId = toast.loading("Movendo para lixeira...");
+
         try {
-            // Update in DB (soft delete metadata)
-            await Promise.all(ids.map(id => db.files.update(id, { deletedAt: timestamp })));
+            // Check if we need to download content first (Remote Provider)
+            const isRemote = provider.constructor.name === 'GoogleDriveProvider'; // Or other check
+
+            if (isRemote) {
+                // We need to fetch content for these files to "backup" them to local trash
+                // This converts them to Local Files in the 'trash' state effectively.
+                const itemsToBackup = files.filter(f => ids.includes(f.id));
+
+                // We can't use db.files.update because these files might be remote-only representations in state?
+                // Actually, 'files' state mixes local and remote if we navigated there?
+                // If we are in Google Drive, 'files' are from Drive. They are NOT in IndexedDB yet (usually).
+                // So we need to:
+                // 1. Fetch content.
+                // 2. Create new Local Records in IndexedDB with 'deletedAt' set.
+                // 3. Trash/Delete on Remote.
+
+                const backupPromises = [];
+
+                // Helper to recursivelly scan and prepare items for backup
+                const processBackupRecursive = async (item, localParentId) => {
+                    // 1. Prepare Content
+                    let content = item.content;
+                    if (item.type !== 'folder' && !content && provider.getContent) {
+                        try {
+                            content = await provider.getContent(item.id);
+                        } catch (e) {
+                            console.warn(`Backup failed for ${item.name}`, e);
+                            content = null;
+                        }
+                    }
+
+                    // 2. Create Local Backup Record
+                    const localBackup = {
+                        ...item,
+                        id: item.id,
+                        workspaceId: activeWorkspace,
+                        parentId: localParentId,
+                        deletedAt: timestamp,
+                        content: content,
+                        originalProvider: 'google-drive'
+                    };
+
+                    backupPromises.push(db.files.put(localBackup));
+
+                    // 3. If Folder, recurse
+                    if (item.type === 'folder') {
+                        try {
+                            const children = await provider.list(item.id);
+                            for (const child of children) {
+                                await processBackupRecursive(child, item.id); // Child's parent is THIS folder's ID
+                            }
+                        } catch (e) {
+                            console.error(`Failed to list children of ${item.name} for backup`, e);
+                        }
+                    }
+                };
+
+                for (const file of itemsToBackup) {
+                    await processBackupRecursive(file, 'trash');
+                }
+
+                await Promise.all(backupPromises);
+            } else {
+                // Local Provider: Just update metadata
+                await Promise.all(ids.map(id => db.files.update(id, { deletedAt: timestamp, parentId: 'trash' })));
+            }
 
             // Update Provider (Trash in Cloud)
             if (provider.trash) {
                 await provider.trash(ids);
             }
 
-            // Update local state
-            setFiles(prev => prev.map(f => ids.includes(f.id) ? { ...f, deletedAt: timestamp } : f));
+            // Update local state: Remove them from view (since they are now in trash)
+            // If we are viewing 'trash', we might add them? 
+            // Usually delete removes from current folder view.
+            setFiles(prev => prev.filter(f => !ids.includes(f.id))); // Remove from view
 
             toast.success(`${ids.length} item(s) movido(s) para a lixeira.`);
         } catch (error) {
             console.error("Erro ao mover para lixeira:", error);
             toast.error("Erro ao excluir itens.");
         } finally {
+            toast.dismiss(toastId);
             setIsProcessing(false);
         }
-    }, [provider]);
+    }, [provider, files, activeWorkspace]);
 
     // 3.1 Restore Files from Trash
     const restoreFiles = useCallback(async (ids) => {

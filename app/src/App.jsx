@@ -61,13 +61,16 @@ const AppLayout = () => {
             if (lastIndex !== -1 && currentIndex !== -1) {
                 const start = Math.min(lastIndex, currentIndex);
                 const end = Math.max(lastIndex, currentIndex);
-                const range = displayedFiles.slice(start, end + 1).map(f => f.id);
+                const rangeIds = displayedFiles.slice(start, end + 1).map(f => f.id);
 
-                // If Ctrl is also pressed, we append to existing selection? 
-                // Standard behavior: Shift+Click replaces selection with range relative to anchor, 
-                // preserving others if Ctrl held? Complex.
-                // Simple version: Shift+Click selects strictly the range from Anchor to Target.
-                selectRange(range);
+                // If Ctrl is held, we ADD this range to existing selection (excluding duplicates)
+                if (isMulti) {
+                    const newSelection = [...new Set([...selectedFileIds, ...rangeIds])];
+                    selectRange(newSelection);
+                } else {
+                    // If just Shift, we REPLACE selection with this range
+                    selectRange(rangeIds);
+                }
                 return;
             }
         }
@@ -446,6 +449,16 @@ const AppLayout = () => {
                     onConfirm: () => emptyTrash()
                 });
                 break;
+            case 'select':
+                // Selects only the target (or adds to selection if multi? usually context 'select' starts selection mode or selects just one)
+                // "Gmail style" usually means selecting the checkbox. 
+                // Let's just exclusive select it for now, or toggle?
+                // If I right click -> Select, I expect it to be selected.
+                setSelectedFileIds([target.id]);
+                break;
+            case 'select-all':
+                setSelectedFileIds(displayedFiles.map(f => f.id));
+                break;
         }
     };
 
@@ -673,6 +686,8 @@ const AppLayout = () => {
                     showDetails={showDetails}
                     onToggleDetails={toggleDetails}
                     onOpenTagManager={() => setShowTagManager(true)}
+                    selectedCount={selectedFileIds.length}
+                    onClearSelection={clearSelection}
                 />
 
                 <div className="flex-1 overflow-y-auto p-4 relative" onClick={clearSelection}>

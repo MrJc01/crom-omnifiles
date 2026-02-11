@@ -26,6 +26,7 @@
         "emptyState": "Esta pasta está vazia. Arraste ficheiros ou clique com o botão direito.",
         "listHeader": {
             "name": "NOME",
+            "type": "TIPO",
             "size": "TAMANHO",
             "date": "MODIFICADO"
         }

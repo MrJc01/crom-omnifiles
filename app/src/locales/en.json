@@ -26,6 +26,7 @@
         "emptyState": "This folder is empty. Drag files or right-click.",
         "listHeader": {
             "name": "NAME",
+            "type": "TYPE",
             "size": "SIZE",
             "date": "MODIFIED"
         }

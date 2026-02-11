@@ -99,6 +99,11 @@ export const ContextMenu = ({ x, y, target, tags = [], onClose, onAction, select
 
             <Divider />
 
+            <MenuItem icon={Check} label={t('ctx.select', 'Selecionar')} onClick={() => onAction('select', target)} />
+            <MenuItem icon={Check} label={t('ctx.selectAll', 'Selecionar Tudo')} onClick={() => onAction('select-all')} />
+
+            <Divider />
+
             {!isMulti && (
                 <MenuItem icon={Info} label={t('ctx.properties', 'Propriedades')} onClick={() => onAction('properties', target)} />
             )}

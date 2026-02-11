@@ -7,14 +7,17 @@ export const useLongPress = (
 ) => {
     const timeout = useRef();
     const target = useRef();
+    const longPressTriggered = useRef(false);
 
     const start = useCallback(
         (event) => {
+            longPressTriggered.current = false;
             if (shouldPreventDefault && event.target) {
                 event.target.addEventListener('touchend', preventDefault, { passive: false });
                 target.current = event.target;
             }
             timeout.current = setTimeout(() => {
+                longPressTriggered.current = true;
                 onLongPress(event);
             }, delay);
         },
@@ -23,8 +26,15 @@ export const useLongPress = (
 
     const clear = useCallback(
         (event, shouldTriggerClick = true) => {
-            timeout.current && clearTimeout(timeout.current);
-            shouldTriggerClick && !timeout.current && onClick && onClick(event);
+            if (timeout.current) {
+                clearTimeout(timeout.current);
+                timeout.current = null;
+            }
+
+            // Only fire onClick if it was a short click (not a long press)
+            if (shouldTriggerClick && !longPressTriggered.current && onClick) {
+                onClick(event);
+            }
 
             if (shouldPreventDefault && target.current) {
                 target.current.removeEventListener('touchend', preventDefault);

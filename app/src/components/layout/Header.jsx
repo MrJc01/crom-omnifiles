@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, ArrowRight, Search, Plus, LayoutGrid, List as ListIcon, Menu, PanelLeft, Info, Tag, Folder, FolderPlus, FilePlus, Upload } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Search, Plus, LayoutGrid, List as ListIcon, Menu, PanelLeft, Info, Tag, Folder, FolderPlus, FilePlus, Upload, X } from 'lucide-react';
 import { Breadcrumb } from '../core/Breadcrumb';
 import { useTranslation } from 'react-i18next';
 import PropTypes from 'prop-types';
@@ -23,7 +23,9 @@ export const Header = ({
     isProcessing,
     showDetails,
     onToggleDetails,
-    onOpenTagManager
+    onOpenTagManager,
+    selectedCount = 0,
+    onClearSelection
 }) => {
     const { t } = useTranslation();
 
@@ -51,6 +53,26 @@ export const Header = ({
             case 'upload-folder': folderInputRef.current?.click(); break;
         }
     };
+
+    // Selection Mode UI
+    if (selectedCount > 0) {
+        return (
+            <header className="h-14 border-b border-blue-900/50 flex items-center px-4 justify-between bg-blue-900/20 backdrop-blur z-20 relative gap-4">
+                <div className="flex items-center gap-4 text-blue-200">
+                    <button onClick={onClearSelection} className="p-2 hover:bg-blue-800/50 rounded-full transition-colors" title={t('header.clearSelection', 'Desmarcar')}>
+                        <X size={20} />
+                    </button>
+                    <span className="font-medium text-lg">
+                        {selectedCount} {selectedCount === 1 ? t('header.selectedItem', 'selecionado') : t('header.selectedItems', 'selecionados')}
+                    </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                    {/* Add quick actions here like Trash, Move, etc? For now just X */}
+                </div>
+            </header>
+        );
+    }
 
     return (
         <header className="h-14 border-b border-slate-800 flex items-center px-4 justify-between bg-slate-900/95 backdrop-blur z-20 relative gap-4">

@@ -32,14 +32,25 @@ const GridItem = memo(({ columnIndex, rowIndex, style, data }) => {
     const index = rowIndex * columnCount + columnIndex;
     const file = files[index];
 
+    const isSelected = selectedFileIds.includes(file?.id);
+    const isSelectionMode = selectedFileIds.length > 0;
+
+    const handleSelect = (e, forceMulti = false) => {
+        e.stopPropagation();
+        // If in selection mode, or check clicked, or Ctrl pressed -> Multi/Toggle behavior
+        // If not in mode and normal click -> Exclusive select
+        const isMulti = forceMulti || isSelectionMode || e.ctrlKey || e.metaKey;
+        onSelect(file.id, { ctrlKey: isMulti, shiftKey: e.shiftKey });
+    };
+
     const bind = useLongPress(
         (e) => {
             if (file) onContextMenu(e, file);
         },
         (e) => {
             if (file) {
-                e.stopPropagation();
-                onSelect(file.id, { ctrlKey: e.ctrlKey || e.metaKey, shiftKey: e.shiftKey });
+                // Short click (from LongPress logic) should select
+                handleSelect(e);
             }
         },
         { shouldPreventDefault: true, delay: 500 }
@@ -48,8 +59,8 @@ const GridItem = memo(({ columnIndex, rowIndex, style, data }) => {
     // Handle edge case where last row isn't full
     if (!isLoading && index >= files.length) return null;
 
-    // Handle react-window style which uses transform instead of left/top
-    // We add GAP via margin instead of modifying left/top directly
+    // ... (omitted styles lines 54-63) ...
+
     const itemStyle = {
         ...style,
         width: Number(style.width || 0) - GAP,
@@ -79,25 +90,38 @@ const GridItem = memo(({ columnIndex, rowIndex, style, data }) => {
                 {...bind}
                 onMouseDown={(e) => { e.stopPropagation(); bind.onMouseDown && bind.onMouseDown(e); }}
                 onDoubleClick={() => { console.log('[FileGrid] Double Click on:', file.name); onNavigate(file); }}
-                onClick={() => console.log('[FileGrid] Click on:', file.name)}
                 onContextMenu={(e) => onContextMenu(e, file)}
                 title={file.name}
                 role="gridcell"
                 aria-label={`${file.type === 'folder' ? 'Pasta' : 'Arquivo'} ${file.name}. Tamanho: ${file.size}. Modificado em: ${file.date}.`}
                 className={`group relative flex flex-col items-center justify-start p-4 rounded-xl border transition-all cursor-pointer select-none w-full h-full
-                    ${selectedFileIds.includes(file.id) ? 'bg-blue-600/20 border-blue-500/50' : 'bg-transparent border-transparent hover:bg-slate-800 hover:border-slate-700'} 
+                    ${isSelected ? 'bg-blue-600/20 border-blue-500/50' : 'bg-transparent border-transparent hover:bg-slate-800 hover:border-slate-700'} 
                     ${focusedIndex === index ? 'ring-2 ring-blue-400 z-10' : ''}
                     ${cutFileIds?.has(file.id) ? 'opacity-50 grayscale' : ''}
                     ${copiedFileIds?.has(file.id) ? 'border-dashed border-slate-500/50' : ''}
                 `}
             >
+                {/* Selection Checkbox */}
+                <div
+                    onClick={(e) => handleSelect(e, true)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onMouseUp={(e) => e.stopPropagation()}
+                    className={`absolute top-2 left-2 z-20 w-5 h-5 rounded border flex items-center justify-center transition-colors shadow-sm
+                        ${isSelected ? 'bg-blue-500 border-blue-500' : 'bg-slate-900/40 border-slate-600/50 hover:bg-slate-900/80 hover:border-slate-400'}
+                    `}
+                >
+                    {isSelected && <div className="w-2 h-2 bg-white rounded-sm" />}
+                </div>
+
                 <div className="mb-3 pointer-events-none relative">
                     <FileIcon type={file.type} className="w-12 h-12" />
                     {file.isStarred && <Star size={12} className="absolute -top-1 -right-1 text-yellow-400 fill-yellow-400 drop-shadow-md" />}
                 </div>
                 <span className="text-sm text-center text-slate-300 font-medium truncate w-full px-2 pointer-events-none">{file.name}</span>
                 <span className="text-[10px] text-slate-500 mt-1 pointer-events-none">{file.date}</span>
-                <div onClick={(e) => { e.stopPropagation(); onSelect(file.id, { ctrlKey: e.ctrlKey || e.metaKey, shiftKey: e.shiftKey }); }} className={`absolute top-2 right-2 w-4 h-4 rounded-full border border-slate-500 ${selectedFileIds.includes(file.id) ? 'bg-blue-500 border-blue-500' : 'bg-transparent'} opacity-0 group-hover:opacity-100 transition-opacity`} />
+
+                {/* Old circular indicator removed in favor of checkbox */}
+                {/* <div onClick={(e) => { e.stopPropagation(); onSelect(file.id, { ctrlKey: e.ctrlKey || e.metaKey, shiftKey: e.shiftKey }); }} className={`absolute top-2 right-2 w-4 h-4 rounded-full border border-slate-500 ${selectedFileIds.includes(file.id) ? 'bg-blue-500 border-blue-500' : 'bg-transparent'} opacity-0 group-hover:opacity-100 transition-opacity`} /> */}
 
                 {/* Tags Indicators */}
                 {file.tags && file.tags.length > 0 && (
@@ -118,6 +142,14 @@ const ListItem = memo(({ index, style, data }) => {
     const { files, isLoading, selectedFileIds, onNavigate, onContextMenu, onSelect, focusedIndex, tags = [], cutFileIds = new Set(), copiedFileIds = new Set() } = data;
 
     const file = files[index];
+    const isSelected = selectedFileIds.includes(file?.id);
+    const isSelectionMode = selectedFileIds.length > 0;
+
+    const handleSelect = (e, forceMulti = false) => {
+        e.stopPropagation();
+        const isMulti = forceMulti || isSelectionMode || e.ctrlKey || e.metaKey;
+        onSelect(file.id, { ctrlKey: isMulti, shiftKey: e.shiftKey });
+    };
 
     const bind = useLongPress(
         (e) => {
@@ -125,11 +157,16 @@ const ListItem = memo(({ index, style, data }) => {
         },
         (e) => {
             if (file) {
-                e.stopPropagation();
-                onSelect(file.id, { ctrlKey: e.ctrlKey || e.metaKey, shiftKey: e.shiftKey });
+                handleSelect(e);
             }
         }
     );
+
+    // Helper to stop propagation for mouse down to prevent drag selection start
+    const handleMouseDown = (e) => {
+        e.stopPropagation();
+        if (bind.onMouseDown) bind.onMouseDown(e);
+    };
 
     if (isLoading) {
         return (
@@ -153,28 +190,40 @@ const ListItem = memo(({ index, style, data }) => {
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.2 }}
-                {...bind}
-                onMouseDown={(e) => { e.stopPropagation(); bind.onMouseDown && bind.onMouseDown(e); }}
-                onDoubleClick={() => onNavigate(file)}
-                onContextMenu={(e) => onContextMenu(e, file)}
                 role="row"
                 aria-label={`${file.name}, ${file.size}, ${file.date}`}
-                className={`grid grid-cols-12 gap-4 items-center px-4 border-b border-slate-800/50 cursor-pointer transition-colors text-sm group select-none w-full h-full
-                    ${selectedFileIds.includes(file.id) ? 'bg-blue-600/20' : 'hover:bg-slate-800'} 
-                    ${focusedIndex === index ? 'ring-2 ring-blue-400 relative z-10' : ''}
+                className={`grid grid-cols-12 gap-4 items-center px-6 border-b border-slate-800/30 cursor-pointer transition-all text-sm group select-none w-full h-full hover:bg-slate-800/40
+                    ${isSelected ? 'bg-blue-900/20 border-blue-900/50' : ''} 
+                    ${focusedIndex === index ? 'ring-1 ring-inset ring-blue-500' : ''}
                     ${cutFileIds?.has(file.id) ? 'opacity-50 grayscale' : ''}
-                    ${copiedFileIds?.has(file.id) ? 'border border-dashed border-slate-500/50' : ''}
+                    ${copiedFileIds?.has(file.id) ? 'border-dashed border-slate-500/50' : ''}
                 `}
+                onDoubleClick={() => onNavigate(file)}
+                onContextMenu={(e) => onContextMenu(e, file)}
+                {...bind}
+                onMouseDown={handleMouseDown}
             >
-                <div className="col-span-5 flex items-center gap-3 overflow-hidden pointer-events-none">
-                    <div className="relative">
-                        <FileIcon type={file.type} className="w-5 h-5 flex-shrink-0" />
+                <div className="col-span-6 flex items-center gap-3 overflow-hidden pr-4 relative">
+                    {/* Selection Checkbox - Inside Col 1 */}
+                    <div
+                        onClick={(e) => handleSelect(e, true)}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onMouseUp={(e) => e.stopPropagation()}
+                        className={`w-5 h-5 rounded border flex-shrink-0 flex items-center justify-center transition-colors z-20 cursor-pointer
+                            ${isSelected ? 'bg-blue-500 border-blue-500' : 'border-slate-700 bg-transparent hover:border-slate-500'}
+                        `}
+                    >
+                        {isSelected && <div className="w-2 h-2 bg-white rounded-sm" />}
+                    </div>
+
+                    <div className="relative flex-shrink-0">
+                        <FileIcon type={file.type} className="w-5 h-5" />
                         {file.isStarred && <Star size={8} className="absolute -top-1 -right-1 text-yellow-400 fill-yellow-400" />}
                     </div>
-                    <span className="truncate text-slate-300">{file.name}</span>
+                    <span className="truncate text-slate-300 font-medium">{file.name}</span>
                     {/* Tags Indicators */}
                     {file.tags && file.tags.length > 0 && (
-                        <div className="flex gap-1 ml-2">
+                        <div className="flex gap-1 ml-2 flex-shrink-0">
                             {file.tags.map(tagId => {
                                 const tag = tags.find(t => t.id === tagId);
                                 if (!tag) return null;
@@ -187,10 +236,12 @@ const ListItem = memo(({ index, style, data }) => {
                 <div className="col-span-2 text-slate-500 text-xs pointer-events-none truncate">
                     {file.type === 'folder' ? 'Pasta' : file.name.split('.').pop().toUpperCase()}
                 </div>
-                <div className="col-span-2 text-slate-500 text-xs pointer-events-none">{file.size}</div>
-                <div className="col-span-2 text-slate-500 text-xs pointer-events-none">{file.date}</div>
-                <div className="col-span-1 flex justify-end opacity-0 group-hover:opacity-100">
-                    <MoreVertical size={14} className="text-slate-400" onClick={(e) => onContextMenu(e, file)} />
+                <div className="col-span-1 text-slate-500 text-xs pointer-events-none truncate">{file.size}</div>
+                <div className="col-span-2 text-slate-500 text-xs pointer-events-none truncate">{file.date}</div>
+                <div className="col-span-1 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button className="p-1 hover:bg-slate-700 rounded-full" onClick={(e) => onContextMenu(e, file)}>
+                        <MoreVertical size={16} className="text-slate-400 hover:text-white" />
+                    </button>
                 </div>
             </motion.div>
         </div>
@@ -345,11 +396,19 @@ export const FileGrid = ({
         >
             {/* List Header (Only for List View) */}
             {viewMode === 'list' && (
-                <div className="grid grid-cols-12 gap-4 px-4 py-2 border-b border-slate-800 text-xs font-semibold text-slate-500 uppercase tracking-wider bg-slate-900 z-10 flex-shrink-0">
-                    <div className="col-span-5 flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => requestSort('name')}>{t('grid.listHeader.name')} <SortIcon col="name" sortConfig={sortConfig} /></div>
-                    <div className="col-span-2 flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => requestSort('type')}>{t('grid.listHeader.type')} <SortIcon col="type" sortConfig={sortConfig} /></div>
-                    <div className="col-span-2 flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => requestSort('size')}>{t('grid.listHeader.size')} <SortIcon col="size" sortConfig={sortConfig} /></div>
-                    <div className="col-span-2 flex items-center gap-1 cursor-pointer hover:text-white" onClick={() => requestSort('date')}>{t('grid.listHeader.date')} <SortIcon col="date" sortConfig={sortConfig} /></div>
+                <div className="grid grid-cols-12 gap-4 px-6 py-3 border-b border-slate-800 text-xs font-bold text-slate-500 uppercase tracking-wider bg-slate-900/95 backdrop-blur z-10 flex-shrink-0 select-none">
+                    <div className="col-span-6 flex items-center gap-1 cursor-pointer hover:text-white transition-colors pl-8" onClick={() => requestSort('name')}>
+                        {t('grid.listHeader.name')} <SortIcon col="name" sortConfig={sortConfig} />
+                    </div>
+                    <div className="col-span-2 flex items-center gap-1 cursor-pointer hover:text-white transition-colors" onClick={() => requestSort('type')}>
+                        {t('grid.listHeader.type')} <SortIcon col="type" sortConfig={sortConfig} />
+                    </div>
+                    <div className="col-span-1 flex items-center gap-1 cursor-pointer hover:text-white transition-colors" onClick={() => requestSort('size')}>
+                        {t('grid.listHeader.size')} <SortIcon col="size" sortConfig={sortConfig} />
+                    </div>
+                    <div className="col-span-2 flex items-center gap-1 cursor-pointer hover:text-white transition-colors" onClick={() => requestSort('date')}>
+                        {t('grid.listHeader.date')} <SortIcon col="date" sortConfig={sortConfig} />
+                    </div>
                     <div className="col-span-1"></div>
                 </div>
             )}
