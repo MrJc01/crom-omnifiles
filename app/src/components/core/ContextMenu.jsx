@@ -87,6 +87,8 @@ export const ContextMenu = ({ x, y, target, tags = [], onClose, onAction, select
                 <MenuItem icon={Clipboard} label={t('ctx.paste', 'Colar')} onClick={() => onAction('paste', target)} />
             )}
 
+            <MenuItem icon={ExternalLink} label={t('ctx.moveTo', 'Mover para...')} onClick={() => onAction('move-to', target)} />
+
             <Divider />
 
             {!isMulti && (

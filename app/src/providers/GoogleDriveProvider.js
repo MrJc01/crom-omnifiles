@@ -187,27 +187,94 @@ export class GoogleDriveProvider extends FileSystemProvider {
         });
     }
 
+    async move(ids, targetFolderId) {
+        // Drive API: addParents=target, removeParents=current
+        // But we need to know current parents for each file to remove them.
+        // We can fetch them first, or optimize.
+        // Simplifying: 
+        // 1. Fetch file to get current parents (if not passed).
+        // 2. Patch.
+
+        // Target: if targetFolderId is null/root, use 'root'.
+        const target = (targetFolderId && !targetFolderId.startsWith('conn-')) ? targetFolderId : 'root';
+
+        for (const id of ids) {
+            // Get current parents
+            const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}?fields=parents`, {
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+            const data = await res.json();
+            const previousParents = data.parents ? data.parents.join(',') : '';
+
+            await fetch(`https://www.googleapis.com/drive/v3/files/${id}?addParents=${target}&removeParents=${previousParents}`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${this.token}` }
+            });
+        }
+        return ids;
+    }
+
+    async copy(ids, targetFolderId) {
+        const target = (targetFolderId && !targetFolderId.startsWith('conn-')) ? targetFolderId : 'root';
+        const newFiles = [];
+
+        for (const id of ids) {
+            const res = await fetch(`https://www.googleapis.com/drive/v3/files/${id}/copy`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${this.token}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ parents: [target] })
+            });
+            const data = await res.json();
+            // Format return to match our internal schema
+            newFiles.push({
+                id: data.id,
+                name: data.name,
+                mimeType: data.mimeType,
+                parentId: targetFolderId, // Local ID mapping
+                workspaceId: this.workspaceId,
+                // We rely on standard list/map for other fields, but good enough for now
+            });
+        }
+        return newFiles;
+    }
+
     async saveFiles(files) {
         const uploaded = [];
+        const idMap = {}; // Map temporary IDs (if any) to real IDs within this batch
+
         for (const file of files) {
-            const actualParent = (file.parentId && file.parentId.startsWith('conn-')) ? 'root' : (file.parentId || 'root');
+            // Check if parent ID is in our local batch map (for nested folder uploads)
+            let targetParentId = file.parentId;
+            if (idMap[targetParentId]) {
+                targetParentId = idMap[targetParentId];
+            }
+
+            const actualParent = (targetParentId && targetParentId.startsWith('conn-')) ? 'root' : (targetParentId || 'root');
 
             const metadata = {
                 name: file.name,
                 parents: [actualParent]
             };
 
+            if (file.type === 'folder') {
+                metadata.mimeType = 'application/vnd.google-apps.folder';
+            }
+
             const formData = new FormData();
             formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
 
-            let contentBlob = file.content;
-            if (typeof contentBlob === 'string') {
-                contentBlob = new Blob([contentBlob], { type: 'text/plain' });
-            } else if (!(contentBlob instanceof Blob) && !(contentBlob instanceof File)) {
-                // Should be Blob or File, but if missing, empty blob
-                contentBlob = new Blob([''], { type: 'text/plain' });
+            if (file.type !== 'folder') {
+                let contentBlob = file.content;
+                if (typeof contentBlob === 'string') {
+                    contentBlob = new Blob([contentBlob], { type: 'text/plain' });
+                } else if (!(contentBlob instanceof Blob) && !(contentBlob instanceof File)) {
+                    contentBlob = new Blob([''], { type: 'text/plain' });
+                }
+                formData.append('file', contentBlob);
             }
-            formData.append('file', contentBlob);
 
             const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
                 method: 'POST',
@@ -223,11 +290,17 @@ export class GoogleDriveProvider extends FileSystemProvider {
             }
 
             const data = await response.json();
+
+            // Register mapping: Temp ID -> Real ID
+            if (file.id) {
+                idMap[file.id] = data.id;
+            }
+
             uploaded.push({
                 id: data.id,
                 name: data.name,
                 type: this.mapMimeType(data.mimeType),
-                parentId: file.parentId, // Keep local parent ID
+                parentId: file.parentId, // Keep local parent ID for the hook to map back
                 workspaceId: this.workspaceId,
                 date: new Date().toLocaleDateString(),
                 size: this.formatSize(data.size || file.sizeRaw || 0),

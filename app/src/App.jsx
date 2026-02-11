@@ -17,6 +17,7 @@ import { WorkspaceSetup } from './components/settings/WorkspaceSetup';
 import { ProviderSetup } from './components/settings/ProviderSetup';
 import { SettingsScreen } from './components/settings/SettingsScreen';
 import { WelcomeScreen } from './components/settings/WelcomeScreen';
+import { MoveCopyModal } from './components/modals/MoveCopyModal';
 
 import { useModal } from './context/ModalContext';
 import { ClipboardProvider, useClipboard } from './context/ClipboardContext';
@@ -37,6 +38,7 @@ const AppLayout = () => {
         pasteFiles, // New method from useFileSystem
         isProcessing, // UI state
         toggleStar, // New method from useFileSystem
+        moveFiles, copyFiles, // New methods
         restoreFiles, permanentDeleteFiles, emptyTrash, downloadFiles, // New
         loadSystem // New method for manual refresh
     } = useFileSystem();
@@ -84,6 +86,7 @@ const AppLayout = () => {
     const [showSettings, setShowSettings] = useState(false);
     const [contextMenu, setContextMenu] = useState(null);
     const [setupWorkspaceName, setSetupWorkspaceName] = useState('');
+    const [moveCopyModal, setMoveCopyModal] = useState({ isOpen: false, items: [] });
 
     // Persistent Preferences
     const [folderPrefs, setFolderPrefs] = useState(() => {
@@ -393,6 +396,10 @@ const AppLayout = () => {
                 break;
             }
             case 'paste': paste(); break;
+            case 'move-to':
+                const itemsToMove = selectedFileIds.length > 0 ? files.filter(f => selectedFileIds.includes(f.id)) : [target];
+                setMoveCopyModal({ isOpen: true, items: itemsToMove });
+                break;
             case 'new-folder':
                 openInput({
                     title: 'Nova Pasta',
@@ -679,7 +686,7 @@ const AppLayout = () => {
                         onSelectRange={handleRangeSelect}
                         sortConfig={sortConfig}
                         requestSort={handleRequestSort}
-                        isLoading={appState === 'loading' || isProcessing}
+                        isLoading={appState === 'loading'}
                         onNavigateUp={navigateUp}
                         tags={tags}
                         onCreateFolder={handleCreateFolderClick}
@@ -699,6 +706,21 @@ const AppLayout = () => {
             </main>
 
             {showTagManager && <TagManager onClose={() => setShowTagManager(false)} />}
+
+            <MoveCopyModal
+                isOpen={moveCopyModal.isOpen}
+                onClose={() => setMoveCopyModal({ isOpen: false, items: [] })}
+                filesToMove={moveCopyModal.items}
+                workspaces={workspaces}
+                onMove={(files, target) => {
+                    if (moveFiles) moveFiles(files, target);
+                    setMoveCopyModal({ isOpen: false, items: [] });
+                }}
+                onCopy={(files, target) => {
+                    if (copyFiles) copyFiles(files, target);
+                    setMoveCopyModal({ isOpen: false, items: [] });
+                }}
+            />
         </div>
     );
 };

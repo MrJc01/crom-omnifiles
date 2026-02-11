@@ -1098,37 +1098,257 @@ export function useFileSystemInternal() {
                         } catch (e) { /* ignore */ }
                     }
                     // If still not found and we have provider.get?
-                    if (!file && provider && typeof provider.get === 'function') {
+                    if (db && db.files) {
                         try {
-                            file = await provider.get(id);
+                            file = await db.files.get(id);
                         } catch (e) { /* ignore */ }
                     }
                 }
-
                 if (file) {
                     await processItem(file, zip);
                     successCount++;
                 }
             }
 
-            if (successCount === 0) {
-                toast.error("Nenhum arquivo encontrado para download.", { id: toastId });
-                return;
+            if (successCount > 0) {
+                const content = await zip.generateAsync({ type: "blob" });
+                saveAs(content, `download-${new Date().getTime()}.zip`);
+                toast.success("Download concluído!");
+            } else {
+                toast.error("Nenhum arquivo válido para download.");
             }
 
-            const content = await zip.generateAsync({ type: "blob" });
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            saveAs(content, `omnifiles-download-${timestamp}.zip`);
-
-            toast.success("Download Concluído!", { id: toastId });
-
         } catch (error) {
-            console.error("Erro ao gerar ZIP:", error);
-            toast.error("Erro ao gerar arquivo ZIP.", { id: toastId });
+            console.error("Zip download failed:", error);
+            toast.error("Erro ao criar arquivo Zip.");
         } finally {
+            toast.dismiss(toastId);
             setIsProcessing(false);
         }
-    }, [files, toast, provider, db]);
+    }, [files, provider, toast, db]);
+
+    // 8. Move Files
+    const moveFiles = useCallback(async (filesToMove, target) => {
+        // target: { folderId, workspaceId, connectionId }
+        if (!filesToMove || filesToMove.length === 0 || !target) return;
+
+        setIsProcessing(true);
+        const toastId = toast.loading(`Movendo ${filesToMove.length} itens...`);
+
+        try {
+            // 1. Resolve Target Provider
+            let targetProvider = provider;
+            let targetWs = workspaces.find(w => w.id === target.workspaceId);
+
+            // If target is in a different context (different workspace or connection)
+            // We need to instantiate the correct provider.
+            // Logic similar to 'provider' useMemo.
+            if (target.connectionId) {
+                // It's a connection (Drive, etc)
+                const conn = targetWs?.connections?.find(c => c.id === target.connectionId);
+                if (conn && conn.serviceId === 'google-drive') {
+                    targetProvider = new GoogleDriveProvider(target.workspaceId, conn.token);
+                } else if (conn) {
+                    // Other providers...
+                    targetProvider = getProvider(targetWs); // Fallback?
+                }
+            } else if (target.workspaceId !== activeWorkspace) {
+                // Different local workspace
+                targetProvider = getProvider(targetWs);
+            }
+
+            // Check if Source Provider == Target Provider
+            // We can check class name or workspaceId + connectionId comparison
+            const isSameProvider = (
+                provider.workspaceId === targetProvider.workspaceId &&
+                provider.constructor.name === targetProvider.constructor.name &&
+                // Ideally check connection ID too if multiple drives?
+                // For now, assume if same workspace and type, same provider instance/scope.
+                // But if moving from Drive A to Drive B in same workspace?
+                // provider usually holds token.
+                provider.token === targetProvider.token
+            );
+
+            if (isSameProvider) {
+                // Optimized Move
+                await provider.move(filesToMove.map(f => f.id), target.folderId);
+
+                // Update Local State if source is visible
+                setFiles(prev => prev.map(f => filesToMove.find(tm => tm.id === f.id) ? { ...f, parentId: target.folderId } : f));
+                // Note: If target folder is also visible (e.g. expanded tree), we might need to refresh?
+                // But effectively they disappear from current view if we are looking at source folder.
+
+                toast.success("Arquivos movidos!");
+            } else {
+                // Cross-Provider Compability (Move = Copy Recursive + Delete)
+
+                // 1. Copy (Upload using addFiles logic but to target)
+                const itemsToUpload = [];
+
+                // Helper to recursivelly scan and prepare items
+                const processItemRecursive = async (item, targetParentId) => {
+                    // 1. Prepare Item
+                    const newId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+                    let content = item.content;
+                    if (item.type !== 'folder' && !content && provider.getContent) {
+                        try {
+                            content = await provider.getContent(item.id);
+                        } catch (e) {
+                            console.warn(`Failed to fetch content for ${item.name}`, e);
+                        }
+                    }
+
+                    const newItem = {
+                        ...item,
+                        id: newId,
+                        parentId: targetParentId,
+                        workspaceId: target.workspaceId,
+                        content: content
+                    };
+                    itemsToUpload.push(newItem);
+
+                    // 2. If Folder, recurse
+                    if (item.type === 'folder') {
+                        try {
+                            const children = await provider.list(item.id);
+                            for (const child of children) {
+                                await processItemRecursive(child, newId);
+                            }
+                        } catch (e) {
+                            console.error(`Failed to list children of ${item.name}`, e);
+                        }
+                    }
+                };
+
+                for (const file of filesToMove) {
+                    await processItemRecursive(file, target.folderId);
+                }
+
+                // Use targetProvider.saveFiles
+                await targetProvider.saveFiles(itemsToUpload);
+
+                // 2. Delete from Source
+                await deleteFiles(filesToMove.map(f => f.id)); // Soft delete? Or permanent?
+                // Usually "Move" implies disappearing from source. 
+                // Using 'deleteFiles' moves to trash.
+                // Ideally we should permanently delete or offer option.
+                // Let's use permanentDelete because we have a copy.
+                await permanentDeleteFiles(filesToMove.map(f => f.id));
+
+                toast.success("Arquivos movidos (entre provedores)!");
+            }
+
+        } catch (error) {
+            console.error("Move failed:", error);
+            toast.error("Erro ao mover arquivos.");
+        } finally {
+            toast.dismiss(toastId);
+            setIsProcessing(false);
+        }
+    }, [provider, workspaces, activeWorkspace, deleteFiles, permanentDeleteFiles]);
+
+    // 9. Copy Files
+    const copyFiles = useCallback(async (filesToCopy, target) => {
+        if (!filesToCopy || filesToCopy.length === 0 || !target) return;
+
+        setIsProcessing(true);
+        const toastId = toast.loading(`Copiando ${filesToCopy.length} itens...`);
+
+        try {
+            // 1. Resolve Target Provider (Same logic as Move)
+            let targetProvider = provider;
+            let targetWs = workspaces.find(w => w.id === target.workspaceId);
+
+            if (target.connectionId) {
+                const conn = targetWs?.connections?.find(c => c.id === target.connectionId);
+                if (conn && conn.serviceId === 'google-drive') {
+                    targetProvider = new GoogleDriveProvider(target.workspaceId, conn.token);
+                } else if (conn) targetProvider = getProvider(targetWs);
+            } else if (target.workspaceId !== activeWorkspace) {
+                targetProvider = getProvider(targetWs);
+            }
+
+            const isSameProvider = (
+                provider.workspaceId === targetProvider.workspaceId &&
+                provider.constructor.name === targetProvider.constructor.name &&
+                provider.token === targetProvider.token
+            );
+
+            if (isSameProvider) {
+                await provider.copy(filesToCopy.map(f => f.id), target.folderId);
+                toast.success("Arquivos copiados!");
+                // If we are copying into CURRENT folder, we need to refresh local state
+                if (target.folderId === currentFolderId) {
+                    loadFiles(); // Re-fetch to see copies
+                }
+            } else {
+                // Cross-Provider: Download -> Upload (Recursive)
+                const itemsToUpload = [];
+
+                // Helper to recursivelly scan and prepare items
+                const processItemRecursive = async (item, targetParentId) => {
+                    // 1. Prepare Item
+                    const newId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+                    let content = item.content;
+                    if (item.type !== 'folder' && !content && provider.getContent) {
+                        try {
+                            content = await provider.getContent(item.id);
+                        } catch (e) {
+                            console.warn(`Failed to fetch content for ${item.name}`, e);
+                        }
+                    }
+
+                    const newItem = {
+                        ...item,
+                        id: newId, // Temporary ID for batch resolution
+                        parentId: targetParentId,
+                        workspaceId: target.workspaceId,
+                        content: content
+                    };
+                    itemsToUpload.push(newItem);
+
+                    // 2. If Folder, recurse
+                    if (item.type === 'folder') {
+                        // We need to list children of THIS item from the SOURCE provider
+                        try {
+                            const children = await provider.list(item.id);
+                            for (const child of children) {
+                                await processItemRecursive(child, newId); // Pass temp ID as parent
+                            }
+                        } catch (e) {
+                            console.error(`Failed to list children of ${item.name}`, e);
+                        }
+                    }
+                };
+
+                // Process all selected root items
+                for (const file of filesToCopy) {
+                    await processItemRecursive(file, target.folderId);
+                }
+
+                // Upload all
+                const saved = await targetProvider.saveFiles(itemsToUpload);
+
+                // If target is current, add to state (root items only?)
+                // Actually saveFiles returns everything. We should probably only add roots or trigger reload.
+                // Simpler: if target is current folder, just reload or add all?
+                // Adding all might duplicate if we are in root. 
+                // Let's just reloadFiles if we are in the target folder.
+                if (target.folderId === currentFolderId && target.workspaceId === activeWorkspace) {
+                    loadFiles();
+                }
+                toast.success("Arquivos copiados (entre provedores)!");
+            }
+        } catch (error) {
+            console.error("Copy failed:", error);
+            toast.error("Erro ao copiar arquivos.");
+        } finally {
+            toast.dismiss(toastId);
+            setIsProcessing(false);
+        }
+    }, [provider, workspaces, activeWorkspace, currentFolderId, loadFiles]);
 
     return {
         appState, setAppState,
@@ -1143,9 +1363,11 @@ export function useFileSystemInternal() {
         pasteFiles,
         isProcessing,
         toggleStar,
-        restoreFiles, permanentDeleteFiles, emptyTrash, downloadFiles,
+        moveFiles,
+        copyFiles,
         restoreFiles, permanentDeleteFiles, emptyTrash, downloadFiles,
         loadSystem,
-        db // Expose db for components like TagManager
+        db, // Expose db for components like TagManager
+        provider // Export provider for advanced use if needed
     };
 }

@@ -82,6 +82,30 @@ export class IndexedDBProvider extends FileSystemProvider {
         await db.files.update(id, { name: newName });
     }
 
+    async move(ids, targetFolderId) {
+        // Update parentId for all files
+        // targetFolderId can be 'root' or null or a uuid.
+        // If targetFolderId is a connection root (conn-...), we might need to handle it?
+        // But IndexedDBProvider is for Local Workspace. connection roots are handled by switching providers.
+        // So targetFolderId here is a local folder ID or null (root).
+
+        await db.files.where('id').anyOf(ids).modify({ parentId: targetFolderId });
+        return ids;
+    }
+
+    async copy(ids, targetFolderId) {
+        const files = await db.files.where('id').anyOf(ids).toArray();
+        const newFiles = files.map(f => ({
+            ...f,
+            id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            parentId: targetFolderId,
+            date: new Date().toLocaleDateString(),
+            name: f.name // Copy name (maybe add "Copy of" logic in hook?)
+        }));
+        await db.files.bulkAdd(newFiles);
+        return newFiles;
+    }
+
     async getContent(id) {
         const file = await db.files.get(id);
         return file ? file.content : null;
