@@ -6,6 +6,20 @@ import { Toaster } from 'react-hot-toast';
 import './styles/index.css'
 import './i18n';
 
+// Google Analytics — inject gtag.js from env
+const GA_ID = import.meta.env.VITE_GA_MEASUREMENT_ID;
+if (GA_ID) {
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = `https://www.googletagmanager.com/gtag/js?id=${GA_ID}`;
+    document.head.appendChild(script);
+
+    window.dataLayer = window.dataLayer || [];
+    function gtag() { window.dataLayer.push(arguments); }
+    gtag('js', new Date());
+    gtag('config', GA_ID);
+}
+
 // Debug Scripts — only in dev mode
 if (import.meta.env.DEV) {
     import('./debug/debug');
